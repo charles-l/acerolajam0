@@ -32,9 +32,11 @@ class SpatialHash:
 
 with open("station2.json") as f:
     map_json = json.load(f)
-walls = map_json["layers"][0]["data2D"]
+entities = [x for x in map_json["layers"] if x["name"] == "Entities"][0]["entities"]
+wander_points = [vec2(p["x"], p["y"]) for p in entities]
+walls = [x for x in map_json["layers"] if x["name"] == "WallTiles"][0]["data2D"]
 wall_recs = SpatialHash([rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE) for y, row in enumerate(walls) for x, t in enumerate(row) if t != -1])
-bg = map_json["layers"][1]["data2D"]
+bg = [x for x in map_json["layers"] if x["name"] == "BGTiles"][0]["data2D"]
 
 SCALE = 4
 WIDTH, HEIGHT = 300 * SCALE, 200 * SCALE
@@ -42,14 +44,15 @@ rl.init_window(WIDTH, HEIGHT, "My awesome game")
 rl.init_audio_device()
 
 beep = rl.load_sound("beep.wav")
+howl = rl.load_sound("noise.wav")
 tiles_tex = rl.load_texture("tiles.png")
 GHOST_TRAIL_TTL = 2
 
 state = SimpleNamespace(
     player = vec2(),
-    ghost_pos = vec2(random.uniform(0, WIDTH), random.uniform(0, HEIGHT)),
-    ghost_target = vec2(random.uniform(0, WIDTH), random.uniform(0, HEIGHT)),
-    target_ttl = random.uniform(0, 10),
+    ghost_pos = vec2(random.choice(wander_points)),
+    ghost_target = vec2(0, 0),
+    target_ttl = 0,
     ghost_state = 'wandering',
     )
 
@@ -74,61 +77,6 @@ def mclamp(v, len):
         return v / l
     return v
 
-weird_shader = rl.load_shader_from_memory(
-    None,
-    """\
-#version 330
-
-// Input vertex attributes (from vertex shader)
-in vec2 fragTexCoord;
-in vec4 fragColor;
-
-// Input uniform values
-uniform sampler2D texture0;
-uniform vec4 colDiffuse;
-
-// Output fragment color
-out vec4 finalColor;
-
-// NOTE: Add here your custom variables
-
-// NOTE: Render size values should be passed from code
-const float renderWidth = 800;
-const float renderHeight = 450;
-
-float radius = 250.0;
-float angle = 0.8;
-
-vec2 center = vec2(200.0, 200.0);
-uniform float time;
-
-void main()
-{
-    vec2 texSize = vec2(renderWidth, renderHeight);
-    vec2 tc = fragTexCoord*texSize;
-    tc -= center;
-
-    float dist = length(tc);
-
-    if (dist < radius)
-    {
-        float percent = (radius - dist)/radius;
-        float theta = percent*percent*angle*8.0 + time;
-        float s = sin(theta);
-        float c = cos(theta);
-
-        //tc = vec2(dot(tc, vec2(c, -s)), dot(tc, vec2(s, c)));
-        tc = vec2(tc * dot(c, s));
-    }
-
-    tc += center;
-    vec4 color = texture2D(texture0, tc/texSize)*colDiffuse*fragColor;;
-
-    finalColor = vec4(color.rgb, 1.0);;
-}
-    """
-    )
-
 flashlight_shader = rl.load_shader_from_memory(
     None,
     """\
@@ -148,10 +96,10 @@ out vec4 finalColor;
 // NOTE: Add here your custom variables
 
 // NOTE: Render size values should be passed from code
-const float renderWidth = 800;
-const float renderHeight = 600;
+const float renderWidth = {WIDTH};
+const float renderHeight = {HEIGHT};
 
-float radius = 200.0;
+float radius = 400.0;
 float angle = 0.8;
 
 uniform vec2 pos = vec2(200.0, 200.0);
@@ -170,7 +118,7 @@ void main()
         finalColor = vec4(0, 0, 0, 0);
     }
 }
-    """
+    """.replace("{WIDTH}", str(WIDTH)).replace("{HEIGHT}", str(HEIGHT))
     )
 
 last_beep = 0
@@ -210,13 +158,13 @@ try:
 
         state.player += input * 200 * rl.get_frame_time()
 
-        camera.target = ivec2(state.player).to_tuple()
-
         if input != vec2():
             last_dir = normalize(input)
 
         if (p := util.resolve_map_collision(wall_recs.near(state.player), rl.Rectangle(state.player.x, state.player.y, PLAYER_SIZE, PLAYER_SIZE))) is not None:
             state.player = p
+
+        camera.target = ivec2(state.player).to_tuple()
 
         for p in pulses:
             if p.active:
@@ -226,16 +174,19 @@ try:
         ghost_pulses[:] = [p for p in ghost_pulses if rl.get_time() < p[2]]
 
         # move ghost
-        if state == 'wandering':
+        if state.ghost_state == 'wandering':
             state.target_ttl -= rl.get_frame_time()
-            if state.target_ttl < 0:
+            if state.target_ttl <= 0:
                 state.target_ttl = random.uniform(6, 20)
-                state.ghost_target = vec2(random.uniform(0, WIDTH), random.uniform(0, HEIGHT))
+
+                state.ghost_target = random.choice([random.choice(wander_points)] +
+                                                   [state.ghost_pos + vec2(random.uniform(-40, 40), random.uniform(-40, 40))] +
+                                                   ([state.player] if length(state.player - state.ghost_pos) < 500 else []))
         else:
             state.ghost_target = state.player
 
         state.ghost_pos += mclamp(state.ghost_target - state.ghost_pos, 10 * rl.get_frame_time())
-        state.ghost_pos = clamp(state.ghost_pos, (0, 0), (WIDTH, HEIGHT))
+        #state.ghost_pos = clamp(state.ghost_pos, (0, 0), (WIDTH, HEIGHT))
 
         dist = length(state.ghost_pos - state.player)
         rate = 0 if dist > 200 else (200 - dist) / 200
@@ -290,19 +241,24 @@ try:
 
         if state.ghost_state == 'enraged':
             rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
+            print(rl.is_sound_playing(howl))
+            if not rl.is_sound_playing(howl):
+                print('play')
+                rl.play_sound(howl)
+                rl.set_sound_volume(howl, clamp((500 - length(state.player - state.ghost_pos)) / 500, 0.1, 1))
 
         rl.end_mode_2d()
         rl.end_texture_mode()
         draw_time = (time.time() - draw_time) * 1000
 
         loc = rl.get_shader_location(flashlight_shader, "pos")
-        p = vec2(WIDTH // 2, HEIGHT // 2)
+        p = vec2(WIDTH // 2, HEIGHT // 2) + last_dir * 150
         rl.set_shader_value(flashlight_shader, loc, rl.Vector2(p.x, HEIGHT - p.y), rl.SHADER_UNIFORM_VEC2)
         rl.begin_drawing()
         rl.clear_background(rl.BLACK)
-        #rl.begin_shader_mode(flashlight_shader)
+        rl.begin_shader_mode(flashlight_shader)
         rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
-        #rl.end_shader_mode()
+        rl.end_shader_mode()
         rl.draw_fps(10, 10)
         rl.draw_text(f"update: {update_time:0.8f}", 10, 30, 20, rl.WHITE)
         rl.draw_text(f"draw: {draw_time:0.8f}", 10, 50, 20, rl.WHITE)
