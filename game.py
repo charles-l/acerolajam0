@@ -7,7 +7,9 @@ from collections import defaultdict, deque
 import util
 import time
 import random
+import itertools
 import os
+import re
 from contextlib import contextmanager
 
 PLAYER_SIZE = 16
@@ -123,10 +125,15 @@ for f in os.listdir('.'):
     if f.endswith('.png'):
         setattr(textures, f.removesuffix('.png'), rl.load_texture(f))
 
+# setup repeat sounds
 sounds = SimpleNamespace()
-for f in os.listdir('.'):
-    if f.endswith('.wav'):
-        setattr(sounds, f.removesuffix('.wav'), rl.load_sound(f))
+sound_files = {x for x in os.listdir('.') if x.endswith('.wav')}
+repeats = {(g.group(1), x) for x in sound_files if (g := re.search(r'(\w+)_(\d+)\.wav$', x))}
+for k, g in itertools.groupby(sorted(repeats), key=lambda x: x[0]):
+    setattr(sounds, k, [rl.load_sound(x[1]) for x in g])
+sound_files -= repeats
+for f in sound_files:
+    setattr(sounds, f.removesuffix('.wav'), rl.load_sound(f))
 
 bg_soundscape = rl.load_music_stream("bg.ogg")
 victory_music = rl.load_music_stream("victory.ogg")
@@ -249,9 +256,9 @@ def intro_loop():
         nonlocal text
         text = "Find the ghost, then return to the entrance."
         yield from wait_time(4, allow_skip=True)
-        text = "<SPACE> sends out a pulse to detects abberations"
+        text = "<SPACE> sends a pulse to detect abberations"
         yield from wait_time(4, allow_skip=True)
-        text = "<X> to piss off the ghost when you're in range"
+        text = "<X> pisses off the ghost when you're in range"
         yield from wait_time(4, allow_skip=True)
         text = "Don't get caught."
         yield from wait_time(4, allow_skip=True)
@@ -297,6 +304,9 @@ def game_loop():
         notifications = notifications[:4]
         notifications.append((5, text))
 
+    step_time = 0
+    STEP_LENGTH = 0.2
+
     rl.play_music_stream(bg_soundscape)
     while not rl.window_should_close():
         rl.update_music_stream(bg_soundscape)
@@ -308,6 +318,7 @@ def game_loop():
         if rl.is_key_down(rl.KEY_RIGHT): input.x += 1
 
         if rl.is_key_released(rl.KEY_X):
+            rl.play_sound(sounds.raspberry)
             if length(player_origin() - state.ghost_pos) < 30:
                 state.ghost_state = 'enraged'
 
@@ -380,8 +391,17 @@ def game_loop():
         for rec in map.wall_recs.near(state.player):
             rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
 
+        draw_rec = player_irec()
+        if length(input) > 0:
+            step_time += rl.get_frame_time()
+            if step_time > STEP_LENGTH:
+                step_time = 0
+                rl.play_sound(random.choice(sounds.step))
+            if step_time > STEP_LENGTH / 2:
+                draw_rec.y -= 2
 
-        rl.draw_rectangle_rec(player_irec(), rl.BLUE)
+        rl.draw_texture_pro(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec, rl.Vector2(), 0, rl.WHITE)
+        #rl.draw_rectangle_rec(player_irec(), rl.BLUE)
         for pos, size, death_time in ghost_pulses:
             col = rl.fade(rl.GRAY, (death_time - rl.get_time()) / GHOST_TRAIL_TTL)
             rl.draw_circle_lines_v(pos, size, col)
