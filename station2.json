@@ -4,6 +4,7 @@
   "height": 976,
   "offsetX": 0,
   "offsetY": 0,
+  "values": {"StationName": "Chambers Street", "StrictWander": false},
   "layers": [
     {
       "name": "Entities",

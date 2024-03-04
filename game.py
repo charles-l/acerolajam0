@@ -57,6 +57,7 @@ class Map:
             r, = [x for x in map_json["layers"] if x["name"] == name]
             return r
 
+        self.name = map_json["values"]["StationName"]
         self.entities = get_layer("Entities")["entities"]
         self.decals = get_layer("Decals")["decals"]
         self.hero_spawn, = self.get_entity_pos("hero")
@@ -66,9 +67,20 @@ class Map:
         self.walls = get_layer("WallTiles")["data2D"]
         self.wall_recs = SpatialHash([rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE) for y, row in enumerate(self.walls) for x, t in enumerate(row) if t != -1])
         self.bg = get_layer("BGTiles")["data2D"]
+        self.strict_wander = map_json["values"]["StrictWander"]
 
     def get_entity_pos(self, name):
         return [vec2(e["x"], e["y"]) for e in self.entities if e["name"] == name]
+
+
+    def get_next_wander_point(self, ghost_pos):
+        if self.strict_wander:
+            return random.choice(self.wander_points)
+        else:
+            return random.choice([random.choice(self.wander_points)] +
+                          [ghost_pos + vec2(random.uniform(-40, 40), random.uniform(-40, 40))] +
+                          ([state.player] if length(state.player - ghost_pos) < 500 else []))
+
 
     def draw(self):
         # bg layer
@@ -113,7 +125,7 @@ class Map:
 
 SCALE = 4
 WIDTH, HEIGHT = 300 * SCALE, 200 * SCALE
-rl.init_window(WIDTH, HEIGHT, "My awesome game")
+rl.init_window(WIDTH, HEIGHT, "Aberration Station")
 rl.init_audio_device()
 
 font = rl.load_font_ex("mago3.ttf", 24, None, 0)
@@ -230,14 +242,37 @@ def draw_text(text, pos, origin=(0.5, 0.5), size=24, color=rl.WHITE):
     pos = (pos[0] - v.x * origin[0], pos[1] - v.y * origin[1])
     rl.draw_text_ex(font, text, (pos[0], pos[1]), size, spacing, color)
 
+
 def victory_loop():
     rl.stop_sound(sounds.howl)
     rl.play_music_stream(victory_music)
+    text = ""
+    def coro():
+        nonlocal text
+        global current_func
+        text = "You escaped!"
+        yield from wait_time(4)
+        if maps:
+            text = "On to the next station:"
+            yield from wait_time(4, allow_skip=True)
+            text = f"This is {maps[0].name}"
+            yield from wait_time(4, allow_skip=True)
+            current_func = game_loop
+        else:
+            text = "You win! <INSERT VICTORY DANCE>"
+            while True:
+                yield
+
+    c = coro()
     while not rl.window_should_close():
+        try:
+            next(c)
+        except StopIteration:
+            return
         rl.update_music_stream(victory_music)
         rl.begin_drawing()
         rl.clear_background(rl.BLACK)
-        draw_text("You escaped!", (WIDTH // 2, HEIGHT // 2), size=48)
+        draw_text(text, (WIDTH // 2, HEIGHT // 2), size=48)
         rl.end_drawing()
 
 
@@ -262,6 +297,8 @@ def intro_loop():
         yield from wait_time(4, allow_skip=True)
         text = "Don't get caught."
         yield from wait_time(4, allow_skip=True)
+        text = f"This is {maps[0].name}"
+        yield from wait_time(4, allow_skip=True)
 
     c = iter(coro())
     while not rl.window_should_close():
@@ -276,9 +313,13 @@ def intro_loop():
         rl.end_drawing()
 
 
+maps = []
+for p in ("station1.json", "station2.json"):
+    with open(p) as f:
+        maps.append(Map(json.load(f)))
+
 def game_loop():
-    with open("station2.json") as f:
-        map = Map(json.load(f))
+    map = maps.pop(0)
     last_dir = vec2(1, 0)
     canvas = rl.load_render_texture(WIDTH // SCALE, HEIGHT // SCALE)
     wait_time = 0
@@ -288,9 +329,8 @@ def game_loop():
     state.player = vec2(*map.hero_spawn)
     state.ghost_pos = vec2()
     for i in range(100):
-        if length(state.ghost_pos - player_origin()) < 500:
-            state.ghost_pos = vec2(random.choice(map.wander_points))
-        else:
+        state.ghost_pos = vec2(random.choice(map.wander_points))
+        if length(state.ghost_pos - player_origin()) > 500:
             break
     if i == 99:
         print("WARNING: RANDOMNESS FAILED?!!")
@@ -362,9 +402,7 @@ def game_loop():
             if state.target_ttl <= 0:
                 state.target_ttl = random.uniform(6, 20)
 
-                state.ghost_target = random.choice([random.choice(map.wander_points)] +
-                                                   [state.ghost_pos + vec2(random.uniform(-40, 40), random.uniform(-40, 40))] +
-                                                   ([state.player] if length(state.player - state.ghost_pos) < 500 else []))
+                state.ghost_target = map.get_next_wander_point(state.ghost_pos)
         else:
             state.ghost_target = state.player
 

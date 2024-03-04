@@ -10,7 +10,10 @@
   "levelDefaultSize": {"x": 320, "y": 240},
   "levelMinSize": {"x": 128, "y": 128},
   "levelMaxSize": {"x": 4096, "y": 4096},
-  "levelValues": [],
+  "levelValues": [
+    {"name": "StationName", "definition": "String", "display": 0, "defaults": "", "maxLength": 0, "trimWhitespace": true},
+    {"name": "StrictWander", "definition": "Boolean", "display": 0, "defaults": false}
+  ],
   "defaultExportMode": ".json",
   "compactExport": false,
   "externalScript": "",
