@@ -439,6 +439,7 @@ class GuiRow:
 def game_loop():
     map = maps.pop(0)
     last_dir = vec2(1, 0)
+    light_offset = vec2()
     canvas = rl.load_render_texture(WIDTH // SCALE, HEIGHT // SCALE)
     wait_time = 0
     last_beep = 0
@@ -581,7 +582,12 @@ def game_loop():
         draw_time = (time.time() - draw_time) * 1000
 
         loc = rl.get_shader_location(flashlight_shader, "pos")
-        p = vec2(WIDTH // 2, HEIGHT // 2) + last_dir * 150
+        # lerp light
+        light_offset += last_dir - light_offset
+        if (l := length(light_offset)):
+            light_offset /= l
+
+        p = vec2(WIDTH // 2, HEIGHT // 2) + light_offset * 150
         rl.set_shader_value(flashlight_shader, loc, rl.Vector2(p.x, HEIGHT - p.y), rl.SHADER_UNIFORM_VEC2)
         rl.begin_drawing()
         rl.clear_background(rl.BLACK)
