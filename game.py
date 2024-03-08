@@ -552,13 +552,12 @@ def game_loop():
         draw_time = time.time()
         rl.begin_texture_mode(canvas)
         rl.begin_mode_2d(camera)
-        rl.clear_background(rl.DARKGRAY)
+        rl.clear_background(rl.BLACK)
 
         map.draw()
 
-        for rec in map.wall_recs.near(state.player):
-            rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
-
+        #for rec in map.wall_recs.near(state.player):
+        #    rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
 
         rl.draw_texture_pro(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec, rl.Vector2(), 0, rl.WHITE)
         #rl.draw_rectangle_rec(player_irec(), rl.BLUE)
