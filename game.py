@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from dataclasses import dataclass
 from collections import defaultdict, deque
 import util
+import math
 import time
 import random
 import itertools
@@ -14,6 +15,7 @@ from contextlib import contextmanager
 
 PLAYER_SIZE = 16
 TILE_SIZE = 16
+ENRAGE_RANGE=32*2
 
 class SpatialHash:
     cell_size = 128
@@ -40,17 +42,6 @@ class Turnstile:
     locked: bool = True
 
 
-@contextmanager
-def popup(title, width=300, height=200, padding=10):
-    rect = rl.Rectangle(WIDTH // 2 - width // 2, HEIGHT // 2 - height // 2, width, height)
-    rl.draw_rectangle_rec(rect, rl.GRAY)
-    draw_text(title, (WIDTH // 2, HEIGHT // 2 - height // 2 + 10))
-    rect.y += 30 + padding
-    rect.height -= 2 * padding
-    rect.x += padding
-    rect.width -= 2 * padding
-    yield rect
-
 class Map:
     def __init__(self, map_json):
         def get_layer(name):
@@ -71,7 +62,6 @@ class Map:
 
     def get_entity_pos(self, name):
         return [vec2(e["x"], e["y"]) for e in self.entities if e["name"] == name]
-
 
     def get_next_wander_point(self, ghost_pos):
         if self.strict_wander:
@@ -168,8 +158,113 @@ class Pulse:
     ttl: float = 5
     active: bool = True
 
-pulses = []
-ghost_pulses = []
+
+class Spring:
+    """Damped spring. Based on https://www.youtube.com/watch?v=KPoeNZZ6H4s"""
+
+    def __init__(self, f, z, r, x0):
+        self.k1 = z / (math.pi * f)
+        self.k2 = 1 / ((2 * math.pi * f) ** 2)
+        self.k3 = r * z / (2 * math.pi * f)
+        self.xp = x0
+        self.y = x0
+        self.yd = type(x0)(0)
+
+    def update(self, x, xd=None):
+        dt = rl.get_frame_time()
+        if dt == 0:
+            return x
+
+        if xd is None:
+            xd = (x - self.xp) / dt
+            self.xp = x
+        # This breaks the first frame, so I'm just using k2 and hoping for
+        # stability since I don't have any high frequency stuff ??
+        #k2_stable = max(self.k2, 1.1 * ((dt**2) / 4 + dt * self.k1 / 2))
+        self.y += dt * self.yd
+        self.yd += (
+            dt * (x + self.k3 * xd - self.y - self.k1 * self.yd) / self.k2
+        )
+        return self.y
+
+
+class Phone:
+    def __init__(self):
+        self.goal_pos = vec2(WIDTH // 2, HEIGHT // 2)
+        self.pos_spring = Spring(2, 0.5, 0, self.goal_pos)
+        self._is_showing = False
+        self._popup_state = 'hidden'
+        self.scan_results = ""
+        self.scan_coro = None
+        self.unit_system = 'imperial'
+        self.hide()
+
+    def show(self):
+        self._is_showing = True
+        self.goal_pos = vec2(WIDTH // 2, HEIGHT // 2)
+
+    def hide(self):
+        self._is_showing = False
+        self.goal_pos = vec2(WIDTH + 300, HEIGHT + 500)
+
+    def update(self, dt):
+        self.pos_spring.update(self.goal_pos)
+        if self.scan_coro is not None:
+            try:
+                next(self.scan_coro)
+            except StopIteration:
+                self.scan_coro = None
+        if self._popup_state == 'idle': # cleanup popup
+            self.hide()
+            self._popup_state = 'hidden'
+        if self._popup_state == 'updated':
+            self._popup_state = 'idle'
+
+    def pixels_to_dist(self, pixels):
+        meters = (pixels / 32)
+        if self.unit_system == 'metric':
+            return f'{meters:0.1f}m'
+        if self.unit_system == 'imperial':
+            return f'{meters * 3.2:0.1f}ft'
+
+    def scan(self):
+        def f():
+            for i in range(3):
+                for x in ['', '.', '..', '...']:
+                    self.scan_results = f"scanning{x}"
+                    yield from wait_time(0.1)
+            plen = length(state.player - state.ghost_pos)
+            self.scan_results = f"Aberration detected: {self.pixels_to_dist(plen)}"
+            if plen < ENRAGE_RANGE:
+                self.scan_results += "\nIN RANGE"
+        self.scan_coro = f()
+
+    @property
+    def pos(self):
+        return self.pos_spring.y
+
+    @property
+    def rect(self):
+        width, height = 350, 600
+        return rl.Rectangle(self.pos.x - width / 2, self.pos.y - height / 2, width, height)
+
+    @contextmanager
+    def popup(self, title, rect, padding=20):
+        if self._popup_state == 'hidden':
+            # init
+            self.show()
+        self._popup_state = 'updated'
+        rl.draw_rectangle_rec(rect, rl.GRAY)
+        draw_text(title, (rect.x + rect.width // 2, rect.y + 20))
+        rect.y += 30 + padding
+        rect.height -= 2 * padding
+        rect.x += padding
+        rect.width -= 2 * padding
+        yield rect
+
+
+#pulses = []
+#ghost_pulses = []
 
 def mclamp(v, len):
     if (l := length(v)) > len:
@@ -276,6 +371,13 @@ def victory_loop():
         rl.end_drawing()
 
 
+def wait_for_key_press():
+    while True:
+        if rl.is_key_released(rl.KEY_SPACE):
+            yield
+            break
+        yield
+
 def wait_time(delay, allow_skip=False):
     t = rl.get_time()
     while t + delay > rl.get_time():
@@ -290,13 +392,13 @@ def intro_loop():
     def coro():
         nonlocal text
         text = "Find the ghost, then return to the entrance."
-        yield from wait_time(4, allow_skip=True)
+        yield from wait_for_key_press()
         text = "<SPACE> sends a pulse to detect abberations"
-        yield from wait_time(4, allow_skip=True)
+        yield from wait_for_key_press()
         text = "<X> pisses off the ghost when you're in range"
-        yield from wait_time(4, allow_skip=True)
+        yield from wait_for_key_press()
         text = "Don't get caught."
-        yield from wait_time(4, allow_skip=True)
+        yield from wait_for_key_press()
         text = f"This is {maps[0].name}"
         yield from wait_time(4, allow_skip=True)
 
@@ -310,6 +412,7 @@ def intro_loop():
         rl.begin_drawing()
         rl.clear_background(rl.BLACK)
         draw_text(text, (WIDTH // 2, HEIGHT // 2), size=48)
+        draw_text("(press space to continue)", (WIDTH // 2, HEIGHT // 2 + 48), size=24)
         rl.end_drawing()
 
 
@@ -317,6 +420,21 @@ maps = []
 for p in ("station1.json", "station2.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
+
+class GuiRow:
+    def __init__(self, container_rect):
+        self.container = container_rect
+        self.y = container_rect.y
+
+    def row_rect(self, height, width=None):
+        y = self.y
+        self.y += height
+        return rl.Rectangle(self.container.x, y, self.container.width if width is None else width, height)
+
+    def row_vec2(self, height):
+        y = self.y
+        self.y += height
+        return vec2(self.container.x, y)
 
 def game_loop():
     map = maps.pop(0)
@@ -339,6 +457,8 @@ def game_loop():
     state.ghost_state = 'wandering'
     notifications = []
 
+    phone = Phone()
+
     def notify(text, ttl=5):
         nonlocal notifications
         notifications = notifications[:4]
@@ -359,25 +479,34 @@ def game_loop():
 
         if rl.is_key_released(rl.KEY_X):
             rl.play_sound(sounds.raspberry)
-            if length(player_origin() - state.ghost_pos) < 30:
+            if length(player_origin() - state.ghost_pos) < ENRAGE_RANGE:
                 state.ghost_state = 'enraged'
 
         input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
         input.y += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_Y)
 
-        if rl.is_key_released(rl.KEY_SPACE):
-            pulses.append(Pulse(player_origin(), 0))
+        #if rl.is_key_released(rl.KEY_SPACE):
+        #    pulses.append(Pulse(player_origin(), 0))
 
         if (vec_length := length(input)) > 1:
             input /= vec_length
 
         prev_pos = vec2(state.player)
-        state.player += input * 200 * rl.get_frame_time()
+        speed_mod = 0.5 if phone._is_showing else 1
+        state.player += input * speed_mod * 200 * rl.get_frame_time()
+
+        map.resolve_collisions(state.player, (PLAYER_SIZE, PLAYER_SIZE))
+        draw_rec = player_irec()
+        if length(input) > 0:
+            step_time += rl.get_frame_time() * speed_mod
+            if step_time > STEP_LENGTH:
+                step_time = 0
+                rl.play_sound(random.choice(sounds.step))
+            if step_time > STEP_LENGTH / 2:
+                draw_rec.y -= 2
 
         if input != vec2():
             last_dir = normalize(input)
-
-        map.resolve_collisions(state.player, (PLAYER_SIZE, PLAYER_SIZE))
 
         if any([rl.check_collision_recs(z, player_rec()) for z in map.exit]):
             if state.ghost_state == 'enraged':
@@ -389,12 +518,12 @@ def game_loop():
 
         camera.target = ivec2(player_origin()).to_tuple()
 
-        for p in pulses:
-            if p.active:
-                p.ttl -= rl.get_frame_time()
-                p.size += rl.get_frame_time() * 80
-        pulses[:] = [p for p in pulses if p.ttl > 0]
-        ghost_pulses[:] = [p for p in ghost_pulses if rl.get_time() < p[2]]
+        #for p in pulses:
+        #    if p.active:
+        #        p.ttl -= rl.get_frame_time()
+        #        p.size += rl.get_frame_time() * 80
+        #pulses[:] = [p for p in pulses if p.ttl > 0]
+        #ghost_pulses[:] = [p for p in ghost_pulses if rl.get_time() < p[2]]
 
         # move ghost
         if state.ghost_state == 'wandering':
@@ -415,6 +544,7 @@ def game_loop():
             last_beep = rl.get_time()
             rl.set_sound_pitch(sounds.beep, 1 + max(0, rate - 0.5))
             rl.play_sound(sounds.beep)
+        phone.update(rl.get_frame_time())
 
         update_time = (time.time() - update_time) * 1000
 
@@ -429,25 +559,17 @@ def game_loop():
         for rec in map.wall_recs.near(state.player):
             rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
 
-        draw_rec = player_irec()
-        if length(input) > 0:
-            step_time += rl.get_frame_time()
-            if step_time > STEP_LENGTH:
-                step_time = 0
-                rl.play_sound(random.choice(sounds.step))
-            if step_time > STEP_LENGTH / 2:
-                draw_rec.y -= 2
 
         rl.draw_texture_pro(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec, rl.Vector2(), 0, rl.WHITE)
         #rl.draw_rectangle_rec(player_irec(), rl.BLUE)
-        for pos, size, death_time in ghost_pulses:
-            col = rl.fade(rl.GRAY, (death_time - rl.get_time()) / GHOST_TRAIL_TTL)
-            rl.draw_circle_lines_v(pos, size, col)
-        for pulse in pulses:
-            if abs(length(state.ghost_pos - pulse.pos) - pulse.size) < 5:
-                ghost_pulses.append((pulse.pos.to_tuple(), pulse.size, rl.get_time() + GHOST_TRAIL_TTL))
-            else:
-                rl.draw_circle_lines_v(pulse.pos.to_tuple(), pulse.size, rl.WHITE)
+        #for pos, size, death_time in ghost_pulses:
+        #    col = rl.fade(rl.GRAY, (death_time - rl.get_time()) / GHOST_TRAIL_TTL)
+        #    rl.draw_circle_lines_v(pos, size, col)
+        #for pulse in pulses:
+        #    if abs(length(state.ghost_pos - pulse.pos) - pulse.size) < 5:
+        #        ghost_pulses.append((pulse.pos.to_tuple(), pulse.size, rl.get_time() + GHOST_TRAIL_TTL))
+        #    else:
+        #        rl.draw_circle_lines_v(pulse.pos.to_tuple(), pulse.size, rl.WHITE)
 
         if state.ghost_state == 'enraged':
             rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
@@ -468,11 +590,28 @@ def game_loop():
         rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
         rl.end_shader_mode()
 
+        # draw phone ui
+        rl.draw_rectangle_rec(phone.rect, rl.PURPLE)
+        gui = GuiRow(phone.rect)
+
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
-                with popup("Pay fare?") as p:
-                    if rl.gui_button(rl.Rectangle(p.x, p.y, 100, 30), "Unlock"):
+                with phone.popup("Pay fare?", gui.row_rect(140)) as p:
+                    if rl.gui_button(rl.Rectangle(p.x, p.y, 250, 50), "Unlock turnstile"):
                         t.locked = False
+                        phone.hide()
+
+        if rl.gui_button(gui.row_rect(50, width=150), "Scan"):
+            phone.scan()
+        gui.row_rect(10)
+        draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0.5))
+
+
+        if rl.is_key_released(rl.KEY_SPACE):
+            if phone._is_showing:
+                phone.hide()
+            else:
+                phone.show()
 
         notifications[:] = [(ttl - rl.get_frame_time(), text) for ttl, text in notifications if ttl > 0]
         for i, n in enumerate(notifications):
