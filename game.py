@@ -139,6 +139,7 @@ for f in sound_files:
     setattr(sounds, f.removesuffix('.wav'), rl.load_sound(f))
 
 bg_soundscape = rl.load_music_stream("bg.ogg")
+scared_loop = rl.load_music_stream("scared_loop.ogg")
 victory_music = rl.load_music_stream("victory.ogg")
 victory_music.looping = False
 
@@ -389,8 +390,44 @@ def draw_text(text, pos, origin=(0.5, 0.5), size=24, color=rl.WHITE):
     pos = (pos[0] - v.x * origin[0], pos[1] - v.y * origin[1])
     rl.draw_text_ex(font, text, (pos[0], pos[1]), size, spacing, color)
 
+def dead_loop():
+    rl.stop_sound(sounds.howl)
+    text = ""
+    img = textures.dead
+    def coro():
+        nonlocal text, img
+        global current_func
+        rl.play_sound(sounds.thump)
+        yield from wait_time(2)
+        rl.play_sound(sounds.death_bell)
+        for _ in wait_time(4):
+            draw_text("You passed out!", (WIDTH // 2, HEIGHT // 2 - 80), size=48)
+            scale = 6
+            rl.draw_texture_pro(textures.dead,
+                                rl.Rectangle(0, 0, textures.dead.width, textures.dead.height),
+                                rl.Rectangle(WIDTH // 2 - (textures.dead.width * scale) // 2,
+                                             HEIGHT // 2 - (textures.dead.height * scale) // 2 + 40,
+                                             textures.dead.width * scale,
+                                             textures.dead.height * scale), rl.Vector2(), 0, rl.WHITE)
+            yield
+        for _ in wait_time(4):
+            draw_text(f"This is {maps[0].name}", (WIDTH // 2, HEIGHT // 2), size=48)
+            yield
+        current_func = game_loop
+
+    c = coro()
+    while not rl.window_should_close():
+        rl.begin_drawing()
+        rl.clear_background(rl.BLACK)
+        try:
+            next(c)
+        except StopIteration:
+            return
+        rl.end_drawing()
+
 
 def victory_loop():
+    maps.pop(0)
     rl.stop_sound(sounds.howl)
     rl.play_music_stream(victory_music)
     text = ""
@@ -498,7 +535,7 @@ class GuiRow:
         return vec2(self.container.x, y)
 
 def game_loop():
-    map = maps.pop(0)
+    map = maps[0]
     last_dir = vec2(1, 0)
     light_offset = vec2()
     canvas = rl.load_render_texture(WIDTH // SCALE, HEIGHT // SCALE)
@@ -525,6 +562,8 @@ def game_loop():
 
     phone = Phone()
     fear = 0
+    MAX_HEALTH = 5
+    fear_health = MAX_HEALTH
 
     def notify(text, ttl=5):
         nonlocal notifications
@@ -535,8 +574,11 @@ def game_loop():
     STEP_LENGTH = 0.2
 
     rl.play_music_stream(bg_soundscape)
+    rl.play_music_stream(scared_loop)
     while not rl.window_should_close():
         rl.update_music_stream(bg_soundscape)
+        rl.update_music_stream(scared_loop)
+        rl.set_music_volume(scared_loop, clamp((1 - (fear_health / MAX_HEALTH)) * 2, 0, 1))
         update_time = time.time()
         input = vec2()
         if rl.is_key_down(rl.KEY_DOWN): input.y += 1
@@ -549,6 +591,13 @@ def game_loop():
                 fear = clamp(fear + rl.get_frame_time() * 2, 0, 1)
         else:
             fear = clamp(fear - rl.get_frame_time(), 0, 1)
+        if fear > 0:
+            fear_health -= fear * rl.get_frame_time()
+        else:
+            fear_health = min(fear_health + 0.3 * rl.get_frame_time(), MAX_HEALTH)
+        if fear_health <= 0:
+            current_func = dead_loop
+            return
 
         if rl.is_key_released(rl.KEY_X):
             rl.play_sound(sounds.raspberry)
@@ -590,7 +639,7 @@ def game_loop():
                 notify("I can't leave until I've dealt with the ghost")
 
         shake = vec2(pnoise([camera.target.x + rl.get_time() / 5]), pnoise([camera.target.y + rl.get_time() / 5])) * 10
-        camera.target = (vec2(ivec2(player_origin())) + shake * fear).to_tuple()
+        camera.target = (vec2(ivec2(player_origin())) + shake * (1 - (fear_health / MAX_HEALTH))).to_tuple()
 
         #for p in pulses:
         #    if p.active:
