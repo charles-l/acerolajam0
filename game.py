@@ -234,8 +234,23 @@ class Phone:
                 for x in ['', '.', '..', '...']:
                     self.scan_results = f"scanning{x}"
                     yield from wait_time(0.1)
-            plen = length(state.player - state.ghost_pos)
-            self.scan_results = f"Aberration detected: {self.pixels_to_dist(plen)}"
+            diff = state.ghost_pos - state.player
+            plen = length(diff)
+            ghostdir = ""
+            if abs(diff.y) > abs(diff.x):
+                if diff.y < 0:
+                    ghostdir = "NORTH"
+                else:
+                    ghostdir = "SOUTH"
+            else:
+                if diff.x < 0:
+                    ghostdir = "WEST"
+                else:
+                    ghostdir = "EAST"
+
+            self.scan_results = f"Aberration detected to the:\n{ghostdir}"
+            #plen = length(state.player - state.ghost_pos)
+            #self.scan_results = f"Aberration detected: {self.pixels_to_dist(plen)}"
             if plen < ENRAGE_RANGE:
                 self.scan_results += "\nIN RANGE"
         self.scan_coro = f()
