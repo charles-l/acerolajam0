@@ -12,6 +12,7 @@ import itertools
 import os
 import re
 from contextlib import contextmanager
+import perlin_noise
 
 PLAYER_SIZE = 16
 TILE_SIZE = 16
@@ -315,6 +316,42 @@ void main()
     """.replace("{WIDTH}", str(WIDTH)).replace("{HEIGHT}", str(HEIGHT))
     )
 
+chromatic_aberration = rl.load_shader_from_memory(
+    None,
+    """\
+#version 330
+
+// Input vertex attributes (from vertex shader)
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+// Input uniform values
+uniform sampler2D texture0;
+
+uniform vec2 rOffset;
+uniform vec2 gOffset;
+uniform vec2 bOffset;
+
+// Output fragment color
+out vec4 finalColor;
+
+float vignette(vec2 uv){
+    uv *= 1.0 - uv.xy;
+    float vignette = uv.x * uv.y * 15.0;
+    return pow(vignette, 0.3 + rOffset.x * 100);
+}
+
+void main()
+{
+    vec4 rValue = texture2D(texture0, fragTexCoord - rOffset);
+    vec4 gValue = texture2D(texture0, fragTexCoord - gOffset);
+    vec4 bValue = texture2D(texture0, fragTexCoord - bOffset);
+
+    finalColor = vec4(rValue.r, gValue.g, bValue.b, 1.0) * vignette(fragTexCoord);
+}
+    """.replace("{WIDTH}", str(WIDTH)).replace("{HEIGHT}", str(HEIGHT))
+    )
+
 def tiles_around(tiles_2d, tile_coord, around = 10):
     ys = range(int(max(0, tile_coord[1]-around)), int(min(len(tiles_2d), tile_coord[1]+around)))
     xs = range(int(max(0, tile_coord[0]-around)), int(min(len(tiles_2d[0]), tile_coord[0]+around)))
@@ -386,6 +423,15 @@ def wait_time(delay, allow_skip=False):
             return
         yield
 
+
+def render_with_shader(from_renderbuf, to_renderbuf, shader):
+    rl.begin_texture_mode(to_renderbuf)
+    rl.begin_shader_mode(shader)
+    rl.clear_background(rl.BLACK)
+    rl.draw_texture_pro(from_renderbuf.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
+    rl.end_shader_mode()
+    rl.end_texture_mode()
+
 def intro_loop():
     global current_func
     text = ""
@@ -441,6 +487,8 @@ def game_loop():
     last_dir = vec2(1, 0)
     light_offset = vec2()
     canvas = rl.load_render_texture(WIDTH // SCALE, HEIGHT // SCALE)
+    canvas2 = rl.load_render_texture(WIDTH, HEIGHT)
+    rl.set_texture_wrap(canvas2.texture, rl.TEXTURE_WRAP_CLAMP)
     wait_time = 0
     last_beep = 0
     global current_func
@@ -458,7 +506,10 @@ def game_loop():
     state.ghost_state = 'wandering'
     notifications = []
 
+    pnoise = perlin_noise.PerlinNoise(octaves=5)
+
     phone = Phone()
+    fear = 0
 
     def notify(text, ttl=5):
         nonlocal notifications
@@ -478,9 +529,15 @@ def game_loop():
         if rl.is_key_down(rl.KEY_LEFT): input.x -= 1
         if rl.is_key_down(rl.KEY_RIGHT): input.x += 1
 
+        if (l := length(player_origin() - state.ghost_pos)) < ENRAGE_RANGE * 2:
+            if state.ghost_state == 'enraged':
+                fear = clamp(fear + rl.get_frame_time() * 2, 0, 1)
+        else:
+            fear = clamp(fear - rl.get_frame_time(), 0, 1)
+
         if rl.is_key_released(rl.KEY_X):
             rl.play_sound(sounds.raspberry)
-            if length(player_origin() - state.ghost_pos) < ENRAGE_RANGE:
+            if l < ENRAGE_RANGE:
                 state.ghost_state = 'enraged'
 
         input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
@@ -517,7 +574,8 @@ def game_loop():
                 state.player = prev_pos
                 notify("I can't leave until I've dealt with the ghost")
 
-        camera.target = ivec2(player_origin()).to_tuple()
+        shake = vec2(pnoise([camera.target.x + rl.get_time() / 5]), pnoise([camera.target.y + rl.get_time() / 5])) * 10
+        camera.target = (vec2(ivec2(player_origin())) + shake * fear).to_tuple()
 
         #for p in pulses:
         #    if p.active:
@@ -579,6 +637,7 @@ def game_loop():
 
         rl.end_mode_2d()
         rl.end_texture_mode()
+
         draw_time = (time.time() - draw_time) * 1000
 
         loc = rl.get_shader_location(flashlight_shader, "pos")
@@ -589,12 +648,9 @@ def game_loop():
 
         p = vec2(WIDTH // 2, HEIGHT // 2) + light_offset * 150
         rl.set_shader_value(flashlight_shader, loc, rl.Vector2(p.x, HEIGHT - p.y), rl.SHADER_UNIFORM_VEC2)
-        rl.begin_drawing()
-        rl.clear_background(rl.BLACK)
-        rl.begin_shader_mode(flashlight_shader)
-        rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
-        rl.end_shader_mode()
+        render_with_shader(canvas, canvas2, flashlight_shader)
 
+        rl.begin_texture_mode(canvas2)
         # draw phone ui
         rl.draw_rectangle_rec(phone.rect, rl.PURPLE)
         gui = GuiRow(phone.rect)
@@ -611,7 +667,6 @@ def game_loop():
         gui.row_rect(10)
         draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0.5))
 
-
         if rl.is_key_released(rl.KEY_SPACE):
             if phone._is_showing:
                 phone.hide()
@@ -622,15 +677,29 @@ def game_loop():
         for i, n in enumerate(notifications):
             draw_text(n[1], (WIDTH // 2, 40 + 20 * i), color=rl.fade(rl.WHITE, min(n[0], 1)))
 
+        rl.end_texture_mode()
+
+        rl.begin_drawing()
+        rl.clear_background(rl.BLACK)
+        loc = rl.get_shader_location(chromatic_aberration, "rOffset")
+        rl.set_shader_value(chromatic_aberration, loc, rl.Vector2(0.01 * fear), rl.SHADER_UNIFORM_VEC2)
+        loc = rl.get_shader_location(chromatic_aberration, "bOffset")
+        rl.set_shader_value(chromatic_aberration, loc, rl.Vector2(0, 0.005 * fear), rl.SHADER_UNIFORM_VEC2)
+        rl.begin_shader_mode(chromatic_aberration)
+        rl.draw_texture_pro(canvas2.texture, rl.Rectangle(0, 0, WIDTH, -HEIGHT), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
+        rl.end_shader_mode()
+
         rl.draw_fps(10, 10)
         rl.draw_text(f"update: {update_time:0.8f}", 10, 30, 20, rl.WHITE)
         rl.draw_text(f"draw: {draw_time:0.8f}", 10, 50, 20, rl.WHITE)
         rl.draw_text(f"wait_time: {wait_time:0.8f}", 10, 70, 20, rl.WHITE)
         wait_time = time.time()
+
         rl.end_drawing()
         wait_time = (time.time() - wait_time) * 1000
 
 current_func = intro_loop
+current_func = game_loop
 
 rl.set_target_fps(60)
 try:
