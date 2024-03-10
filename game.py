@@ -17,6 +17,8 @@ import perlin_noise
 PLAYER_SIZE = 16
 TILE_SIZE = 16
 ENRAGE_RANGE=32*2
+SUCK_RANGE=100
+assert SUCK_RANGE > ENRAGE_RANGE
 
 class SpatialHash:
     cell_size = 128
@@ -115,11 +117,16 @@ class Map:
             else:
                 rl.draw_rectangle_lines_ex(t.rec, 1, rl.LIGHTGRAY)
 
-        frame_i = int((rl.get_time() % 0.2) / 0.1)
-        frame_width = textures.ghostvac.width / 2
-
         for i in range(len(self.ghostvac_cable)-1):
             rl.draw_line_bezier(self.ghostvac_cable[i], self.ghostvac_cable[i+1], 2, rl.DARKPURPLE)
+
+        frame_width = textures.ghostvac.width / 2
+        if state.ghost_state == 'sucking':
+            frame_i = int((rl.get_time() % 0.2) / 0.1)
+        elif state.ghost_state == 'sucked':
+            frame_i = 1
+        else:
+            frame_i = int((rl.get_time() % 1) / 0.5)
 
         add_texture_sorted(textures.ghostvac,
                            rl.Rectangle(frame_i * frame_width, 0, frame_width, textures.ghostvac.height),
@@ -458,7 +465,7 @@ def victory_loop():
     def coro():
         nonlocal text
         global current_func
-        text = "You escaped!"
+        text = "You caught the aberration!"
         yield from wait_time(4)
         if maps:
             text = "On to the next station:"
@@ -571,6 +578,7 @@ def game_loop():
 
     state.player = vec2(*map.hero_spawn)
     state.ghost_pos = vec2()
+    state.ghost_health = 1
     for i in range(100):
         state.ghost_pos = vec2(random.choice(map.wander_points))
         if length(state.ghost_pos - player_origin()) > 500:
@@ -610,9 +618,8 @@ def game_loop():
         if rl.is_key_down(rl.KEY_LEFT): input.x -= 1
         if rl.is_key_down(rl.KEY_RIGHT): input.x += 1
 
-        if (l := length(player_origin() - state.ghost_pos)) < ENRAGE_RANGE * 2:
-            if state.ghost_state == 'enraged':
-                fear = clamp(fear + rl.get_frame_time() * 2, 0, 1)
+        if (l := length(player_origin() - state.ghost_pos)) < ENRAGE_RANGE * 2 and state.ghost_state == 'enraged':
+            fear = clamp(fear + rl.get_frame_time() * 2, 0, 1)
         else:
             fear = clamp(fear - rl.get_frame_time(), 0, 1)
         if fear > 0:
@@ -655,7 +662,7 @@ def game_loop():
             last_dir = normalize(input)
 
         if any([rl.check_collision_recs(z, player_rec()) for z in map.exit]):
-            if state.ghost_state == 'enraged':
+            if state.ghost_state == 'sucked':
                 current_func = victory_loop
                 return
             else:
@@ -673,21 +680,32 @@ def game_loop():
         #ghost_pulses[:] = [p for p in ghost_pulses if rl.get_time() < p[2]]
 
         # move ghost
+        ghost_to_vac_dist = length(state.ghost_pos - map.ghostvac)
         if state.ghost_state == 'wandering':
             state.target_ttl -= rl.get_frame_time()
             if state.target_ttl <= 0:
                 state.target_ttl = random.uniform(6, 20)
 
                 state.ghost_target = map.get_next_wander_point(state.ghost_pos)
-        else:
+        elif state.ghost_state == 'enraged':
             state.ghost_target = state.player
+            if ghost_to_vac_dist < SUCK_RANGE:
+                state.ghost_state = 'sucking'
+                rl.play_sound(sounds.vacuum)
+        elif state.ghost_state == 'sucking':
+            state.ghost_target = map.ghostvac + 32
+            if ghost_to_vac_dist < 64:
+                state.ghost_health -= rl.get_frame_time() * 0.5
+            if state.ghost_health < 0:
+                state.ghost_state = 'sucked'
+                rl.play_sound(sounds.ghost_sucked)
 
         state.ghost_pos += mclamp(state.ghost_target - state.ghost_pos, 10 * rl.get_frame_time())
         #state.ghost_pos = clamp(state.ghost_pos, (0, 0), (WIDTH, HEIGHT))
 
         dist = length(state.ghost_pos - state.player)
         rate = 0 if dist > 200 else (200 - dist) / 200
-        if rate > 0 and last_beep + (1 - min(0.8, rate)) * 0.2 < rl.get_time():
+        if state.ghost_state != 'sucked' and rate > 0 and last_beep + (1 - min(0.8, rate)) * 0.2 < rl.get_time():
             last_beep = rl.get_time()
             rl.set_sound_pitch(sounds.beep, 1 + max(0, rate - 0.5))
             rl.play_sound(sounds.beep)
@@ -722,17 +740,26 @@ def game_loop():
         #    else:
         #        rl.draw_circle_lines_v(pulse.pos.to_tuple(), pulse.size, rl.WHITE)
 
-        if state.ghost_state == 'enraged':
-            #rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
-            ghost_nframes = 4
+        if state.ghost_state != 'wandering':
+            ghost_nframes = 5
             frame_width = textures.ghost.width / ghost_nframes
-            frame_i = int((rl.get_time() * 15) % 4)
+            if state.ghost_state == 'enraged':
+                #rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
+                frame_i = int((rl.get_time() * 15) % 4)
+                if not rl.is_sound_playing(sounds.howl):
+                    rl.play_sound(sounds.howl)
+                    rl.set_sound_volume(sounds.howl, clamp((500 - length(state.player - state.ghost_pos)) / 500, 0.1, 1))
+            if state.ghost_state == 'sucking':
+                frame_i = 4
             add_texture_sorted(textures.ghost,
-                               rl.Rectangle(frame_width * frame_i, 0, frame_width, textures.ghost.height),
-                               rl.Rectangle(state.ghost_pos.x - frame_width / 2, state.ghost_pos.y - textures.ghost.height / 2, frame_width, textures.ghost.height))
-            if not rl.is_sound_playing(sounds.howl):
-                rl.play_sound(sounds.howl)
-                rl.set_sound_volume(sounds.howl, clamp((500 - length(state.player - state.ghost_pos)) / 500, 0.1, 1))
+                               rl.Rectangle(frame_width * frame_i,
+                                            0,
+                                            frame_width * (-1 if state.ghost_target.x < state.ghost_pos.x else 1),
+                                            textures.ghost.height),
+                               rl.Rectangle(state.ghost_pos.x - frame_width / 2,
+                                            state.ghost_pos.y - textures.ghost.height / 2,
+                                            frame_width * state.ghost_health,
+                                            textures.ghost.height * state.ghost_health))
 
         rl.end_mode_2d()
         rl.end_texture_mode()
