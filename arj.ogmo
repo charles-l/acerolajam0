@@ -91,9 +91,11 @@
       "hasNodes": false,
       "nodeLimit": 0,
       "nodeDisplay": 0,
-      "nodeGhost": true,
+      "nodeGhost": false,
       "tags": [],
-      "values": []
+      "values": [],
+      "texture": "hero.png",
+      "textureImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAOFJREFUOI1jZMABovMe/kfmL50kz4hNHYYgukZ0gG4QnENIIy6DGInVzKErx8DAwMDw4/IjFEOYiLURphFmEAwwkup0dIDXBUsnyTMsnSSPV4wFWYKBgYEhOu8hnB1/9gkDAwMDw0JjGbgGdDEmXPFLLMAZC8jOjM57iCEOdSkj0ekAWSOUj0gH/dO9MDSfuT4dn2FwixmRNcM0mWhmMjAwMDBsWKGFojEg4hpcHcwQpt83njH8vvEMr43o4MnFyXAvs2BTgG4zPnG4AfqM/gxbL7igSB482AP3q719CdbsDQDRMWQMBkN2YwAAAABJRU5ErkJggg=="
     },
     {
       "exportID": "40896680",
@@ -202,9 +204,47 @@
       "nodeGhost": true,
       "tags": [],
       "values": []
+    },
+    {
+      "exportID": "02087588",
+      "name": "ghostvac",
+      "limit": -1,
+      "size": {"x": 16, "y": 16},
+      "origin": {"x": 0, "y": 0},
+      "originAnchored": true,
+      "shape": {
+        "label": "Rectangle",
+        "points": [
+          {"x": -1, "y": -1},
+          {"x": 1, "y": -1},
+          {"x": -1, "y": 1},
+          {"x": 1, "y": -1},
+          {"x": -1, "y": 1},
+          {"x": 1, "y": 1}
+        ]
+      },
+      "color": "#ff0000ff",
+      "tileX": false,
+      "tileY": false,
+      "tileSize": {"x": 32, "y": 32},
+      "resizeableX": false,
+      "resizeableY": false,
+      "rotatable": false,
+      "rotationDegrees": 360,
+      "canFlipX": false,
+      "canFlipY": false,
+      "canSetColor": false,
+      "hasNodes": true,
+      "nodeLimit": 0,
+      "nodeDisplay": 0,
+      "nodeGhost": true,
+      "tags": [],
+      "values": [],
+      "texture": "ghostvac_off.png",
+      "textureImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAdVJREFUWIXtVz1Lw1AUPU/6BzIoSguKKIgFp4Ig+gscurVDQbKIihR0KuJHUazSqUIR6tbBDnbLoDi4KR0kk5BS0FFxzE+IQ5qQvtyXl9b6MeRAIH2575xz77sJt8Afg4UNtEzT6ptcUaT8sTBihq6Tm4sbl+798dU2yWPoOpKplNCQb0GUqZfIK5xcSNrPXwyfEe8eV5Az0fNDVmZD13FWvMZMYrZnnTeRWV+01zlxykToCjjIre4AgM+EF9RxUOIAMEIFlCo1IUHj9gIA8Pb+Sl4i8VKlRvYA2YTOBi/2dzd9JgD6nKn9Ighfk9Ojc/IovEZEBijxg5M9UivwPc3lC9bcvN1g7PMjKJSENREHABxurQl1hEcgIgOA8bHRwNjpqUm0nulvBw9fE/42IgORgchAZEBoYJARbBAu0sAwxWWc/+8IfiL7IG5hBZqaNhTRTtsI5Oox4Dhsahqyqsoa1TLrtI1viTeqZZZVVeaY4Ksg7YFBTTjisjg3gM+eD8zlC331BiV+U69bmXTaFu4OqKEnIorQmRtF814YxAB59stLK4HZBz1/aj26fFlVZehWwTJNiykKiwFAq/vfLxGPS8W8uH+4k8bI+EKVrh9TPLwVoPAFUNTg2r9dRlYAAAAASUVORK5CYII="
     }
   ],
   "tilesets": [
-    {"label": "New Tileset", "path": "tiles.png", "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAYAAACm53kpAAAAAXNSR0IArs4c6QAAAHhJREFUWIVjtLcv+c9AAVhgtIkS7QzdvlwU6c/d24XCZ7qzEoX/TyUcrzwTRbYPAzAaAAPtgIEGLAPtgIerKSqCGBiEKNM+4lPAaAAMtAMGGgx4GSAfykiZAXsp0z7iU8BoAAy0AwYaDHgZMNoOGGAwGgAD7YCBBgAIOREk8fOLbgAAAABJRU5ErkJggg==", "tileWidth": 16, "tileHeight": 16, "tileSeparationX": 0, "tileSeparationY": 0, "tileMarginX": 0, "tileMarginY": 0}
+    {"label": "New Tileset", "path": "tiles.png", "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAAAQCAYAAABA4nAoAAAAAXNSR0IArs4c6QAAAn1JREFUaIHtmr1Lw0AUwF/FISB+oK2tKFqsiouitoNDwS6KmzoKju6uLk71H3B38K8Q0UWhokN1sIoBUfyoWJvSaHUQQeqgkaT5uCTv9GKSHwSae/fuXsN7l3vvEgAkK2vrVYx+emkxIP2eHEwqxtrhMwH5vZa8Lz5cBQBIjk/D48O9avyLmxwYybHciRWU/tzsDEpf5NMo/WM+qmpLTaU0++5u76raGh4+UPPn3kso/dGRuKot3NEJmcMtAADo7xkylNejZv+mu6tTV3abvzeUu4HWULuurCwUDeUAuOcn8gDxsX6ykRocHV+o2iTnF8pKxyzmC5CaSmkGAZbG5hZbei/PT+i5qQSAz/9Gb8Wv5ezkVNH3N4Lhr6ljbYAPXbRWdaP2UCQIQrn0c5GQ9w1FgihbnYAfAC7EahB4Gc9vgcIduPwEmwTTRi8fIOUJodagqTdAbd/LtzdrBtbCeAlmHgCrC8u6VaSJRNKwwjSRSFY3zjdR80vVALtwTT0ofadg1vmt9nU6zANgL5vBDdBAxw4f+8Q4zpYe+u1BASoBcJs3rq+T5CzRqhNb4U6sQFkoGvYhyf/z85M7v+TQZgMixnGQe3/9FbvMwvwcIC077OqNJhRbnqvrrOIgTEsuHYSxYm52BvX/sXKRN2cnCZo5gKWVnXEO4FeBXIbdCpBXcwBHBUCM4xSXVbnPF34Z1DzMk2Cvs7d/gNIfblPe2y2D/hXSwuWEBBjADwD0OQAWUoJMpI3cxQzyfb3eJw7Sya+VfKEWpzi+hOcDAHsOMD8wQMkStpCcHwBAKJSgvSviqhzA8wHgBjB7e6FQAqFg3qHPsqe259KDxleddvkE0i8MSQjTCV4AAAAASUVORK5CYII=", "tileWidth": 16, "tileHeight": 16, "tileSeparationX": 0, "tileSeparationY": 0, "tileMarginX": 0, "tileMarginY": 0}
   ]
 }

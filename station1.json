@@ -24,7 +24,21 @@
         {"name": "turnstile", "id": 5, "_eid": "49229616", "x": 1040, "y": 448, "originX": 0, "originY": 0},
         {"name": "spawnpoint", "id": 6, "_eid": "40896680", "x": 688, "y": 976, "originX": 0, "originY": 0},
         {"name": "spawnpoint", "id": 7, "_eid": "40896680", "x": 928, "y": 976, "originX": 0, "originY": 0},
-        {"name": "spawnpoint", "id": 8, "_eid": "40896680", "x": 688, "y": 976, "originX": 0, "originY": 0}
+        {"name": "spawnpoint", "id": 8, "_eid": "40896680", "x": 688, "y": 976, "originX": 0, "originY": 0},
+        {
+          "name": "ghostvac",
+          "id": 10,
+          "_eid": "02087588",
+          "x": 736,
+          "y": 192,
+          "originX": 0,
+          "originY": 0,
+          "nodes": [
+            {"x": 784, "y": 176},
+            {"x": 784, "y": 144},
+            {"x": 800, "y": 96}
+          ]
+        }
       ]
     },
     {
@@ -37,7 +51,7 @@
       "gridCellsX": 80,
       "gridCellsY": 84,
       "decals": [
-        {"x": 768, "y": 192, "texture": "exit.png", "originX": 0, "originY": 0}
+        {"x": 784, "y": 192, "texture": "exit.png", "originX": 0, "originY": 0}
       ],
       "folder": ""
     },

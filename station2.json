@@ -33,7 +33,20 @@
         {"name": "turnstile", "id": 16, "_eid": "49229616", "x": 416, "y": 160, "originX": 0, "originY": 0},
         {"name": "turnstile", "id": 17, "_eid": "49229616", "x": 80, "y": 720, "originX": 0, "originY": 0},
         {"name": "turnstile", "id": 19, "_eid": "49229616", "x": 144, "y": 720, "originX": 0, "originY": 0},
-        {"name": "spawnpoint", "id": 20, "_eid": "40896680", "x": 912, "y": 784, "originX": 0, "originY": 0}
+        {"name": "spawnpoint", "id": 20, "_eid": "40896680", "x": 912, "y": 784, "originX": 0, "originY": 0},
+        {
+          "name": "ghostvac",
+          "id": 21,
+          "_eid": "02087588",
+          "x": 304,
+          "y": 160,
+          "originX": 0,
+          "originY": 0,
+          "nodes": [
+            {"x": 272, "y": 144},
+            {"x": 272, "y": 80}
+          ]
+        }
       ]
     },
     {

@@ -37,6 +37,10 @@ class SpatialHash:
             r.extend([self.recs[i] for i in self.spatial[(h[0] + d[0], h[1] + d[1])]])
         return r
 
+sorted_texs = []
+def add_texture_sorted(tex, src_rect, dest_rec):
+    sorted_texs.append((tex, src_rect, dest_rec))
+
 @dataclass
 class Turnstile:
     rec: rl.Rectangle
@@ -55,9 +59,15 @@ class Map:
         self.hero_spawn, = self.get_entity_pos("hero")
         self.wander_points = self.get_entity_pos("spawnpoint")
         self.exit = [rl.Rectangle(z["x"], z["y"], z["width"], z["height"]) for z in self.entities if z["name"] == "safezone"]
+        ghostvac = [e for e in self.entities if e["name"] == "ghostvac"][0]
+        self.ghostvac = vec2(ghostvac["x"], ghostvac["y"])
+        self.ghostvac_cable = [rl.Vector2(*(self.ghostvac + vec2(16, 16)))] + [rl.Vector2(n["x"], n["y"]) for n in ghostvac["nodes"]]
         self.turnstiles = [Turnstile(rl.Rectangle(z.x, z.y, TILE_SIZE, TILE_SIZE)) for z in self.get_entity_pos("turnstile")]
         self.walls = get_layer("WallTiles")["data2D"]
-        self.wall_recs = SpatialHash([rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE) for y, row in enumerate(self.walls) for x, t in enumerate(row) if t != -1])
+        self.wall_recs = SpatialHash([rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                                      for y, row in enumerate(self.walls)
+                                      for x, t in enumerate(row) if t != -1] +
+                                     [rl.Rectangle(self.ghostvac.x, self.ghostvac.y + TILE_SIZE - 2, TILE_SIZE * 2, TILE_SIZE + 2)])
         self.bg = get_layer("BGTiles")["data2D"]
         self.strict_wander = map_json["values"]["StrictWander"]
 
@@ -104,6 +114,20 @@ class Map:
                 rl.draw_rectangle_rec(t.rec, rl.LIGHTGRAY)
             else:
                 rl.draw_rectangle_lines_ex(t.rec, 1, rl.LIGHTGRAY)
+
+        frame_i = int((rl.get_time() % 0.2) / 0.1)
+        frame_width = textures.ghostvac.width / 2
+
+        for i in range(len(self.ghostvac_cable)-1):
+            rl.draw_line_bezier(self.ghostvac_cable[i], self.ghostvac_cable[i+1], 2, rl.DARKPURPLE)
+
+        add_texture_sorted(textures.ghostvac,
+                           rl.Rectangle(frame_i * frame_width, 0, frame_width, textures.ghostvac.height),
+                           rl.Rectangle(self.ghostvac.x,
+                                        self.ghostvac.y,
+                                        frame_width,
+                                        textures.ghostvac.height))
+
 
     def resolve_collisions(self, entity_pos, entity_size=(TILE_SIZE, TILE_SIZE)):
         entity_rec = rl.Rectangle(entity_pos[0], entity_pos[1], entity_size[0], entity_size[1])
@@ -682,7 +706,12 @@ def game_loop():
         #for rec in map.wall_recs.near(state.player):
         #    rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
 
-        rl.draw_texture_pro(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec, rl.Vector2(), 0, rl.WHITE)
+        add_texture_sorted(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec)
+
+        sorted_texs.sort(key=lambda x: x[2].y)
+        for tex, src, dest in sorted_texs:
+            rl.draw_texture_pro(tex, src, dest, rl.Vector2(), 0, rl.WHITE)
+        sorted_texs.clear()
         #rl.draw_rectangle_rec(player_irec(), rl.BLUE)
         #for pos, size, death_time in ghost_pulses:
         #    col = rl.fade(rl.GRAY, (death_time - rl.get_time()) / GHOST_TRAIL_TTL)
@@ -694,7 +723,13 @@ def game_loop():
         #        rl.draw_circle_lines_v(pulse.pos.to_tuple(), pulse.size, rl.WHITE)
 
         if state.ghost_state == 'enraged':
-            rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
+            #rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
+            ghost_nframes = 4
+            frame_width = textures.ghost.width / ghost_nframes
+            frame_i = int((rl.get_time() * 15) % 4)
+            add_texture_sorted(textures.ghost,
+                               rl.Rectangle(frame_width * frame_i, 0, frame_width, textures.ghost.height),
+                               rl.Rectangle(state.ghost_pos.x - frame_width / 2, state.ghost_pos.y - textures.ghost.height / 2, frame_width, textures.ghost.height))
             if not rl.is_sound_playing(sounds.howl):
                 rl.play_sound(sounds.howl)
                 rl.set_sound_volume(sounds.howl, clamp((500 - length(state.player - state.ghost_pos)) / 500, 0.1, 1))
@@ -725,6 +760,7 @@ def game_loop():
                     if rl.gui_button(rl.Rectangle(p.x, p.y, 250, 50), "Unlock turnstile"):
                         t.locked = False
                         phone.hide()
+                        rl.play_sound(sounds.turnstile)
 
         if rl.gui_button(gui.row_rect(50, width=150), "Scan"):
             phone.scan()
