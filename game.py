@@ -249,9 +249,25 @@ class Phone:
     def is_camera_active(self):
         return self._is_showing and self.page == 1
 
+    @property
+    def screen_rect(self):
+        return pad_rect(self.rect, 10)
+
+    @property
+    def screen_space_rect(self):
+        return rl.Rectangle(self.screen_rect.x / SCALE,
+                            self.screen_rect.y / SCALE,
+                            self.screen_rect.width / SCALE,
+                            self.screen_rect.height / SCALE)
+
     def hide(self):
         self._is_showing = False
         self.goal_pos = vec2(WIDTH + 300, HEIGHT + 500)
+
+    def in_viewfinder(self, rect):
+        p = rl.get_world_to_screen_2d(rl.Vector2(rect.x, rect.y), camera)
+        r = rl.Rectangle(p.x, p.y, rect.width, rect.height)
+        return self.is_camera_active and rl.check_collision_recs(self.screen_space_rect, r)
 
     def update(self, dt):
         self.pos_spring.update(self.goal_pos)
@@ -618,6 +634,14 @@ def game_loop():
     MAX_HEALTH = 5
     fear_health = MAX_HEALTH
 
+    ghost_nframes = 5
+    def ghost_rect():
+        frame_width = textures.ghost.width / ghost_nframes
+        return rl.Rectangle(state.ghost_pos.x - frame_width / 2,
+                     state.ghost_pos.y - textures.ghost.height / 2,
+                     frame_width * state.ghost_health,
+                     textures.ghost.height * state.ghost_health)
+
     def notify(text, ttl=5):
         nonlocal notifications
         notifications = notifications[:4]
@@ -628,6 +652,7 @@ def game_loop():
 
     rl.play_music_stream(bg_soundscape)
     rl.play_music_stream(scared_loop)
+
     while not rl.window_should_close():
         rl.update_music_stream(bg_soundscape)
         rl.update_music_stream(scared_loop)
@@ -655,7 +680,7 @@ def game_loop():
         #    rl.play_sound(sounds.raspberry)
         #    if l < ENRAGE_RANGE:
         #        state.ghost_state = 'enraged'
-        if l < ENRAGE_RANGE and phone.is_camera_active:
+        if phone.in_viewfinder(ghost_rect()):
             state.ghost_state = 'enraged'
 
         input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
@@ -764,7 +789,6 @@ def game_loop():
         #        rl.draw_circle_lines_v(pulse.pos.to_tuple(), pulse.size, rl.WHITE)
 
         if state.ghost_state != 'wandering':
-            ghost_nframes = 5
             frame_width = textures.ghost.width / ghost_nframes
             if state.ghost_state == 'enraged':
                 #rl.draw_circle_v(state.ghost_pos.to_tuple(), 20, rl.RED)
@@ -779,10 +803,7 @@ def game_loop():
                                             0,
                                             frame_width * (-1 if state.ghost_target.x < state.ghost_pos.x else 1),
                                             textures.ghost.height),
-                               rl.Rectangle(state.ghost_pos.x - frame_width / 2,
-                                            state.ghost_pos.y - textures.ghost.height / 2,
-                                            frame_width * state.ghost_health,
-                                            textures.ghost.height * state.ghost_health))
+                               ghost_rect())
 
         rl.end_mode_2d()
         rl.end_texture_mode()
@@ -802,9 +823,8 @@ def game_loop():
         rl.begin_texture_mode(canvas2)
         # draw phone ui
         rl.draw_rectangle_rounded(phone.rect, 0.1, 5, rl.WHITE)
-        screen_rect = rl.Rectangle(phone.rect.x + 10, phone.rect.y + 10, phone.rect.width - 20, phone.rect.height - 20)
-        rl.begin_scissor_mode(int(screen_rect.x), int(screen_rect.y), int(screen_rect.width), int(screen_rect.height))
-        gui = GuiRow(screen_rect)
+        rl.begin_scissor_mode(int(phone.screen_rect.x), int(phone.screen_rect.y), int(phone.screen_rect.width), int(phone.screen_rect.height))
+        gui = GuiRow(phone.screen_rect)
         bottom_row = gui.row_rect(-50)
 
         if phone.page == 0:
@@ -819,14 +839,13 @@ def game_loop():
             if rl.gui_button(rl.Rectangle(button_pos.x - 20, button_pos.y - 20, 40, 40), ""):
                 rl.play_sound(sounds.camera)
                 img = rl.load_image_from_texture(canvas.texture)
-                screen_space_rect = rl.Rectangle(screen_rect.x / SCALE, screen_rect.y / SCALE, screen_rect.width / SCALE, screen_rect.height / SCALE)
-                rl.image_crop(img, screen_space_rect)
+                rl.image_crop(img, phone.screen_space_rect)
                 if phone.last_pic is not None:
                     rl.unload_texture(phone.last_pic)
                 phone.last_pic = rl.load_texture_from_image(img)
                 rl.unload_image(img)
 
-            last_pic_preview = rl.Rectangle(screen_rect.x + 10, screen_rect.y + 400, 60, 110)
+            last_pic_preview = rl.Rectangle(phone.screen_rect.x + 10, phone.screen_rect.y + 400, 60, 110)
             if phone.last_pic:
                 rl.draw_texture_pro(phone.last_pic,
                                     tex_rect(phone.last_pic, flipv=True),
