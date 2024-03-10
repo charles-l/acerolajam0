@@ -48,6 +48,12 @@ class Turnstile:
     rec: rl.Rectangle
     locked: bool = True
 
+def tex_rect(tex, flipv=False):
+    return rl.Rectangle(0, 0, tex.width, tex.height * (-1 if flipv else 1))
+
+def pad_rect(rect, padding):
+    return rl.Rectangle(rect.x + padding, rect.y + padding, rect.width - padding * 2, rect.height - padding * 2)
+
 
 class Map:
     def __init__(self, map_json):
@@ -109,7 +115,7 @@ class Map:
 
         for decal in self.decals:
             tex = getattr(textures, decal["texture"].removesuffix(".png"))
-            rl.draw_texture(tex, decal["x"] - tex.width * decal["originX"], decal["y"] - tex.height - decal["originY"], rl.WHITE)
+            rl.draw_texture(tex, int(decal["x"] - tex.width * decal["originX"]), int(decal["y"] - tex.height * decal["originY"]), rl.WHITE)
 
         for t in self.turnstiles:
             if t.locked:
@@ -223,18 +229,25 @@ class Spring:
 
 class Phone:
     def __init__(self):
-        self.goal_pos = vec2(WIDTH // 2, HEIGHT // 2)
+        self.hide()
         self.pos_spring = Spring(2, 0.5, 0, self.goal_pos)
         self._is_showing = False
         self._popup_state = 'hidden'
         self.scan_results = ""
         self.scan_coro = None
         self.unit_system = 'imperial'
-        self.hide()
+        self.page = 0
+        self.pages = 2
+        self.last_pic = None
+        self.pic_contents = set()
 
     def show(self):
         self._is_showing = True
         self.goal_pos = vec2(WIDTH // 2, HEIGHT // 2)
+
+    @property
+    def is_camera_active(self):
+        return self._is_showing and self.page == 1
 
     def hide(self):
         self._is_showing = False
@@ -546,24 +559,32 @@ def intro_loop():
 
 
 maps = []
-for p in ("station1.json", "station2.json"):
+for p in ("station1.json", "station2.json", "station3.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
 
 class GuiRow:
     def __init__(self, container_rect):
-        self.container = container_rect
+        self.container = rl.Rectangle(container_rect.x, container_rect.y, container_rect.width, container_rect.height)
         self.y = container_rect.y
 
+    def _make_space(self, height):
+        if height < 0:
+            height *= -1
+            self.container.height -= height
+            y = self.container.y + self.container.height
+        else:
+            y = self.y
+            self.y += height
+        return y, height
+
     def row_rect(self, height, width=None):
-        y = self.y
-        self.y += height
+        y, height = self._make_space(height)
         return rl.Rectangle(self.container.x, y, self.container.width if width is None else width, height)
 
-    def row_vec2(self, height):
-        y = self.y
-        self.y += height
-        return vec2(self.container.x, y)
+    def row_vec2(self, height, origin=(0, 0)):
+        y, height = self._make_space(height)
+        return vec2(self.container.x + self.container.width * origin[0], y + origin[1] * self.container.y)
 
 def game_loop():
     map = maps[0]
@@ -630,10 +651,12 @@ def game_loop():
             current_func = dead_loop
             return
 
-        if rl.is_key_released(rl.KEY_X):
-            rl.play_sound(sounds.raspberry)
-            if l < ENRAGE_RANGE:
-                state.ghost_state = 'enraged'
+        #if rl.is_key_released(rl.KEY_X):
+        #    rl.play_sound(sounds.raspberry)
+        #    if l < ENRAGE_RANGE:
+        #        state.ghost_state = 'enraged'
+        if l < ENRAGE_RANGE and phone.is_camera_active:
+            state.ghost_state = 'enraged'
 
         input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
         input.y += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_Y)
@@ -778,8 +801,46 @@ def game_loop():
 
         rl.begin_texture_mode(canvas2)
         # draw phone ui
-        rl.draw_rectangle_rec(phone.rect, rl.PURPLE)
-        gui = GuiRow(phone.rect)
+        rl.draw_rectangle_rounded(phone.rect, 0.1, 5, rl.WHITE)
+        screen_rect = rl.Rectangle(phone.rect.x + 10, phone.rect.y + 10, phone.rect.width - 20, phone.rect.height - 20)
+        rl.begin_scissor_mode(int(screen_rect.x), int(screen_rect.y), int(screen_rect.width), int(screen_rect.height))
+        gui = GuiRow(screen_rect)
+        bottom_row = gui.row_rect(-50)
+
+        if phone.page == 0:
+            if rl.gui_button(gui.row_rect(50), "Scan"):
+                phone.scan()
+            gui.row_rect(10)
+            draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0), color=rl.BLACK)
+        elif phone.page == 1:
+            rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.Color(220, 220, 255, 255))
+            draw_text('CAMERA', gui.row_vec2(30, origin=(0.5, 0.5)), origin=(0.5, 0.5), color=rl.GREEN)
+            button_pos = gui.row_vec2(-100, origin=(0.5, 0.5))
+            if rl.gui_button(rl.Rectangle(button_pos.x - 20, button_pos.y - 20, 40, 40), ""):
+                rl.play_sound(sounds.camera)
+                img = rl.load_image_from_texture(canvas.texture)
+                screen_space_rect = rl.Rectangle(screen_rect.x / SCALE, screen_rect.y / SCALE, screen_rect.width / SCALE, screen_rect.height / SCALE)
+                rl.image_crop(img, screen_space_rect)
+                if phone.last_pic is not None:
+                    rl.unload_texture(phone.last_pic)
+                phone.last_pic = rl.load_texture_from_image(img)
+                rl.unload_image(img)
+
+            last_pic_preview = rl.Rectangle(screen_rect.x + 10, screen_rect.y + 400, 60, 110)
+            if phone.last_pic:
+                rl.draw_texture_pro(phone.last_pic,
+                                    tex_rect(phone.last_pic, flipv=True),
+                                    last_pic_preview,
+                                    rl.Vector2(0, 0),
+                                    0,
+                                    rl.WHITE)
+            else:
+                rl.draw_rectangle_rec(last_pic_preview, rl.GRAY)
+            icon_width, icon_height = textures.camera_icon.width, textures.camera_icon.height
+            rl.draw_texture_pro(textures.camera_icon,
+                                rl.Rectangle(0, 0, icon_width, icon_height),
+                                rl.Rectangle(button_pos.x - icon_width, button_pos.y - icon_height, icon_width * 2, icon_height * 2),
+                                rl.Vector2(0, 0), 0, rl.WHITE)
 
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
@@ -789,10 +850,18 @@ def game_loop():
                         phone.hide()
                         rl.play_sound(sounds.turnstile)
 
-        if rl.gui_button(gui.row_rect(50, width=150), "Scan"):
-            phone.scan()
-        gui.row_rect(10)
-        draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0.5))
+        if rl.gui_button(rl.Rectangle(bottom_row.x, bottom_row.y, 50, bottom_row.height), "<-"):
+            phone.page = (phone.page - 1) % phone.pages
+        if rl.gui_button(rl.Rectangle(bottom_row.x + bottom_row.width - 50, bottom_row.y, 50, bottom_row.height), "->"):
+            phone.page = (phone.page + 1) % phone.pages
+        for i in range(phone.pages):
+            center = (bottom_row.x + bottom_row.width / 2 - 20 + (40 / phone.pages) * i,
+                      bottom_row.y + bottom_row.height / 2)
+            if i == phone.page:
+                rl.draw_circle_v(center, 5, rl.BLACK)
+            else:
+                rl.draw_circle_lines_v(center, 5, rl.BLACK)
+        rl.end_scissor_mode()
 
         if rl.is_key_released(rl.KEY_SPACE):
             if phone._is_showing:
