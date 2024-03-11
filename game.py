@@ -237,7 +237,7 @@ class Phone:
         self.scan_coro = None
         self.unit_system = 'imperial'
         self.page = 0
-        self.pages = 2
+        self.pages = 3
         self.last_pic = None
         self.pic_contents = set()
 
@@ -269,8 +269,8 @@ class Phone:
         r = rl.Rectangle(p.x, p.y, rect.width, rect.height)
         return self.is_camera_active and rl.check_collision_recs(self.screen_space_rect, r)
 
-    def update(self, dt):
-        self.pos_spring.update(self.goal_pos)
+    def update(self, dt, shake):
+        self.pos_spring.update(self.goal_pos + shake)
         if self.scan_coro is not None:
             try:
                 next(self.scan_coro)
@@ -596,11 +596,15 @@ class GuiRow:
 
     def row_rect(self, height, width=None):
         y, height = self._make_space(height)
-        return rl.Rectangle(self.container.x, y, self.container.width if width is None else width, height)
+        width = self.container.width if width is None else width
+        return rl.Rectangle(self.container.x + (self.container.width - width) / 2, y, width, height)
+
+    def rect_left(self):
+        return rl.Rectangle(self.container.x, self.y, self.container.width, self.container.height - (self.container.y - self.y))
 
     def row_vec2(self, height, origin=(0, 0)):
         y, height = self._make_space(height)
-        return vec2(self.container.x + self.container.width * origin[0], y + origin[1] * self.container.y)
+        return vec2(self.container.x + self.container.width * origin[0], y + origin[1] * height)
 
 def game_loop():
     map = maps[0]
@@ -680,9 +684,6 @@ def game_loop():
         #    rl.play_sound(sounds.raspberry)
         #    if l < ENRAGE_RANGE:
         #        state.ghost_state = 'enraged'
-        if phone.in_viewfinder(ghost_rect()):
-            state.ghost_state = 'enraged'
-
         input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
         input.y += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_Y)
 
@@ -718,7 +719,8 @@ def game_loop():
                 notify("I can't leave until I've dealt with the ghost")
 
         shake = vec2(pnoise([camera.target.x + rl.get_time() / 5]), pnoise([camera.target.y + rl.get_time() / 5])) * 10
-        camera.target = (vec2(ivec2(player_origin())) + shake * (1 - (fear_health / MAX_HEALTH))).to_tuple()
+        shake_amt = (1 - (fear_health / MAX_HEALTH))
+        camera.target = (vec2(ivec2(player_origin())) + shake * shake_amt).to_tuple()
 
         #for p in pulses:
         #    if p.active:
@@ -757,7 +759,7 @@ def game_loop():
             last_beep = rl.get_time()
             rl.set_sound_pitch(sounds.beep, 1 + max(0, rate - 0.5))
             rl.play_sound(sounds.beep)
-        phone.update(rl.get_frame_time())
+        phone.update(rl.get_frame_time(), shake * 20 * shake_amt)
 
         update_time = (time.time() - update_time) * 1000
 
@@ -825,10 +827,16 @@ def game_loop():
         rl.draw_rectangle_rounded(phone.rect, 0.1, 5, rl.WHITE)
         rl.begin_scissor_mode(int(phone.screen_rect.x), int(phone.screen_rect.y), int(phone.screen_rect.width), int(phone.screen_rect.height))
         gui = GuiRow(phone.screen_rect)
+        r = gui.row_rect(20)
+        rl.draw_rectangle_rec(r, rl.BLACK)
+        rl.draw_rectangle_rec(rl.Rectangle(r.x + r.width - 24, r.y + 4, 18, r.height - 8), rl.WHITE)
+        rl.draw_rectangle_rec(rl.Rectangle(r.x + r.width - 8, r.y + 6, 4, r.height - 12), rl.WHITE)
         bottom_row = gui.row_rect(-50)
 
         if phone.page == 0:
-            if rl.gui_button(gui.row_rect(50), "Scan"):
+            rl.draw_rectangle_rec(gui.rect_left(), rl.PURPLE)
+            draw_text("Apparition Pal", gui.row_vec2(60, origin=(0.5, 0.5)), color=rl.WHITE)
+            if rl.gui_button(gui.row_rect(50, width=120), "Scan"):
                 phone.scan()
             gui.row_rect(10)
             draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0), color=rl.BLACK)
@@ -845,6 +853,10 @@ def game_loop():
                 phone.last_pic = rl.load_texture_from_image(img)
                 rl.unload_image(img)
 
+                if phone.in_viewfinder(ghost_rect()):
+                    state.ghost_state = 'enraged'
+
+
             last_pic_preview = rl.Rectangle(phone.screen_rect.x + 10, phone.screen_rect.y + 400, 60, 110)
             if phone.last_pic:
                 rl.draw_texture_pro(phone.last_pic,
@@ -860,6 +872,21 @@ def game_loop():
                                 rl.Rectangle(0, 0, icon_width, icon_height),
                                 rl.Rectangle(button_pos.x - icon_width, button_pos.y - icon_height, icon_width * 2, icon_height * 2),
                                 rl.Vector2(0, 0), 0, rl.WHITE)
+        elif phone.page == 2:
+            gui.row_rect(20)
+            rl.draw_texture_pro(textures.ghostvac_off,
+                                tex_rect(textures.ghostvac_off),
+                                gui.row_rect(120, 120),
+                                (0, 0),
+                                0,
+                                rl.WHITE)
+
+            draw_text("GHOSTVAC 3000", gui.row_vec2(40, origin=(0.5, 0.5)), color=rl.BLACK, size=32)
+            draw_text("Target name: FRED", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+            draw_text("Status: ARMED", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+            draw_text("Ready to vacuum some", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
+            draw_text("VERMIN", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
+            draw_text(">:)", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
 
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
