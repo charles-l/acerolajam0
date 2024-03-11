@@ -12,7 +12,8 @@
   "levelMaxSize": {"x": 4096, "y": 4096},
   "levelValues": [
     {"name": "StationName", "definition": "String", "display": 0, "defaults": "", "maxLength": 0, "trimWhitespace": true},
-    {"name": "StrictWander", "definition": "Boolean", "display": 0, "defaults": false}
+    {"name": "StrictWander", "definition": "Boolean", "display": 0, "defaults": false},
+    {"name": "GhostName", "definition": "String", "display": 0, "defaults": "", "maxLength": 0, "trimWhitespace": true}
   ],
   "defaultExportMode": ".json",
   "compactExport": false,
@@ -37,7 +38,9 @@
       "includeImageSequence": true,
       "scaleable": false,
       "rotatable": false,
-      "values": []
+      "values": [
+        {"name": "hint", "definition": "String", "display": 0, "defaults": "", "maxLength": 0, "trimWhitespace": true}
+      ]
     },
     {
       "definition": "tile",

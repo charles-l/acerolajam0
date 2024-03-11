@@ -62,13 +62,23 @@ class Map:
             return r
 
         self.name = map_json["values"]["StationName"]
+        self.ghost_name = map_json["values"]["GhostName"]
         self.entities = get_layer("Entities")["entities"]
         self.decals = get_layer("Decals")["decals"]
+        self.hints = []
+        for decal in self.decals:
+            decal['texture'] = getattr(textures, decal["texture"].removesuffix(".png"))
+            w, h = decal['texture'].width, decal['texture'].height
+            decal['x'] = decal['x'] - decal['originX'] * w
+            decal['y'] = decal['y'] - decal['originY'] * h
+            if decal['values']['hint']:
+                self.hints.append((rl.Rectangle(decal['x'], decal['y'], w, h), decal['values']['hint']))
         self.hero_spawn, = self.get_entity_pos("hero")
         self.wander_points = self.get_entity_pos("spawnpoint")
         self.exit = [rl.Rectangle(z["x"], z["y"], z["width"], z["height"]) for z in self.entities if z["name"] == "safezone"]
         ghostvac = [e for e in self.entities if e["name"] == "ghostvac"][0]
         self.ghostvac = vec2(ghostvac["x"], ghostvac["y"])
+        self.ghostvac_name = None
         self.ghostvac_cable = [rl.Vector2(*(self.ghostvac + vec2(16, 16)))] + [rl.Vector2(n["x"], n["y"]) for n in ghostvac["nodes"]]
         self.turnstiles = [Turnstile(rl.Rectangle(z.x, z.y, TILE_SIZE, TILE_SIZE)) for z in self.get_entity_pos("turnstile")]
         self.walls = get_layer("WallTiles")["data2D"]
@@ -114,8 +124,7 @@ class Map:
                                 rl.WHITE)
 
         for decal in self.decals:
-            tex = getattr(textures, decal["texture"].removesuffix(".png"))
-            rl.draw_texture(tex, int(decal["x"] - tex.width * decal["originX"]), int(decal["y"] - tex.height * decal["originY"]), rl.WHITE)
+            rl.draw_texture(decal["texture"], int(decal["x"]), int(decal["y"]), rl.WHITE)
 
         for t in self.turnstiles:
             if t.locked:
@@ -127,12 +136,14 @@ class Map:
             rl.draw_line_bezier(self.ghostvac_cable[i], self.ghostvac_cable[i+1], 2, rl.DARKPURPLE)
 
         frame_width = textures.ghostvac.width / 2
-        if state.ghost_state == 'sucking':
-            frame_i = int((rl.get_time() % 0.2) / 0.1)
+        if self.ghostvac_name is not None:
+            frame_i = int((rl.get_time() % 1) / 0.5)
+            if state.ghost_state == 'sucking':
+                frame_i = int((rl.get_time() % 0.2) / 0.1)
         elif state.ghost_state == 'sucked':
             frame_i = 1
         else:
-            frame_i = int((rl.get_time() % 1) / 0.5)
+            frame_i = 0
 
         add_texture_sorted(textures.ghostvac,
                            rl.Rectangle(frame_i * frame_width, 0, frame_width, textures.ghostvac.height),
@@ -503,19 +514,26 @@ def victory_loop():
             yield from wait_time(4, allow_skip=True)
             current_func = game_loop
         else:
-            text = "You win! <INSERT VICTORY DANCE>"
+            text = "You win!"
+            victory_dance_frames = 8
+            width = int(textures.victory_dance.width / victory_dance_frames)
+            height = textures.victory_dance.height
             while True:
+                frame = int((10 * rl.get_time()) % victory_dance_frames)
+                rl.draw_texture_pro(textures.victory_dance,
+                                    rl.Rectangle(width * frame, 0, width, height),
+                                    rl.Rectangle((rl.get_time() * 100) % (WIDTH + 260) - 130, HEIGHT - 200, width * 6, height * 6), rl.Vector2(width // 2, height // 2), 0, rl.WHITE)
                 yield
 
     c = coro()
     while not rl.window_should_close():
+        rl.update_music_stream(victory_music)
+        rl.begin_drawing()
+        rl.clear_background(rl.BLACK)
         try:
             next(c)
         except StopIteration:
             return
-        rl.update_music_stream(victory_music)
-        rl.begin_drawing()
-        rl.clear_background(rl.BLACK)
         draw_text(text, (WIDTH // 2, HEIGHT // 2), size=48)
         rl.end_drawing()
 
@@ -578,6 +596,7 @@ maps = []
 for p in ("station1.json", "station2.json", "station3.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
+maps[0].ghostvac_name = "DAVE"
 
 class GuiRow:
     def __init__(self, container_rect):
@@ -657,6 +676,7 @@ def game_loop():
     rl.play_music_stream(bg_soundscape)
     rl.play_music_stream(scared_loop)
 
+    input_text = rl.ffi.new("char[20]")
     while not rl.window_should_close():
         rl.update_music_stream(bg_soundscape)
         rl.update_music_stream(scared_loop)
@@ -667,6 +687,11 @@ def game_loop():
         if rl.is_key_down(rl.KEY_UP): input.y -= 1
         if rl.is_key_down(rl.KEY_LEFT): input.x -= 1
         if rl.is_key_down(rl.KEY_RIGHT): input.x += 1
+
+        if rl.is_key_down(rl.KEY_W): input.y -= 1
+        if rl.is_key_down(rl.KEY_A): input.x -= 1
+        if rl.is_key_down(rl.KEY_S): input.y += 1
+        if rl.is_key_down(rl.KEY_D): input.x += 1
 
         if (l := length(player_origin() - state.ghost_pos)) < ENRAGE_RANGE * 2 and state.ghost_state == 'enraged':
             fear = clamp(fear + rl.get_frame_time() * 2, 0, 1)
@@ -684,8 +709,6 @@ def game_loop():
         #    rl.play_sound(sounds.raspberry)
         #    if l < ENRAGE_RANGE:
         #        state.ghost_state = 'enraged'
-        input.x += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_X)
-        input.y += rl.get_gamepad_axis_movement(0, rl.GAMEPAD_AXIS_LEFT_Y)
 
         #if rl.is_key_released(rl.KEY_SPACE):
         #    pulses.append(Pulse(player_origin(), 0))
@@ -856,6 +879,13 @@ def game_loop():
                 if phone.in_viewfinder(ghost_rect()):
                     state.ghost_state = 'enraged'
 
+                for rec, hint in map.hints:
+                    print(rec)
+                    if phone.in_viewfinder(rec):
+                        notify(f"Discovered: {hint}")
+                        if hint == 'FRED':
+                            map.ghostvac_name = "FRED"
+
 
             last_pic_preview = rl.Rectangle(phone.screen_rect.x + 10, phone.screen_rect.y + 400, 60, 110)
             if phone.last_pic:
@@ -882,11 +912,33 @@ def game_loop():
                                 rl.WHITE)
 
             draw_text("GHOSTVAC 3000", gui.row_vec2(40, origin=(0.5, 0.5)), color=rl.BLACK, size=32)
-            draw_text("Target name: FRED", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
-            draw_text("Status: ARMED", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
-            draw_text("Ready to vacuum some", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
-            draw_text("VERMIN", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
-            draw_text(">:)", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+            if map.ghostvac_name:
+                draw_text(f"Target name: {map.ghostvac_name}", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+                draw_text("Status: ARMED", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+                draw_text("Ready to vacuum some", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
+                draw_text("VERMIN", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GREEN)
+                draw_text(">:)", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GREEN)
+            else:
+                draw_text("Target name: ???", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.GRAY)
+                draw_text("Status: INACTIVE", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.RED)
+                draw_text("Required: TARGET NAME", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GRAY)
+
+                # FIXME: don't use raygui for this since we can't control which keys are forwarded
+
+                draw_text("Enter your guess:", gui.row_vec2(20, origin=(0.5, 0.5)), color=rl.GRAY)
+                gui.row_rect(20)
+                if rl.gui_text_box(
+                    gui.row_rect(40, 120),
+                    rl.ffi.cast("char*", input_text),
+                    len(input_text),
+                    True,
+                ):
+                    name = rl.ffi.string(input_text).decode("ascii").upper()
+                    if name == map.ghost_name:
+                        map.ghostvac_name = name
+                if rl.is_key_released(rl.KEY_ENTER):
+                    input_text[0] = b'\0'
+
 
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
@@ -910,6 +962,7 @@ def game_loop():
         rl.end_scissor_mode()
 
         if rl.is_key_released(rl.KEY_SPACE):
+            input_text[0] = b'\0'
             if phone._is_showing:
                 phone.hide()
             else:
@@ -942,6 +995,9 @@ def game_loop():
 
 current_func = intro_loop
 current_func = game_loop
+maps.pop(0)
+maps = [0]
+current_func = victory_loop
 
 rl.set_target_fps(60)
 try:
