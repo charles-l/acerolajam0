@@ -13,6 +13,7 @@ import os
 import re
 from contextlib import contextmanager
 import perlin_noise
+import textwrap
 
 PLAYER_SIZE = 16
 TILE_SIZE = 16
@@ -66,6 +67,7 @@ class Map:
         self.entities = get_layer("Entities")["entities"]
         self.decals = get_layer("Decals")["decals"]
         self.hints = []
+        self.messages_func = None
         for decal in self.decals:
             decal['texture'] = getattr(textures, decal["texture"].removesuffix(".png"))
             w, h = decal['texture'].width, decal['texture'].height
@@ -237,6 +239,37 @@ class Spring:
         )
         return self.y
 
+class StatusMessage:
+    def __init__(self, text):
+        self.text = text
+        self.height = 30
+
+    def draw(self, pos):
+        t = Text(self.text, pos, origin=(0, 0), color=rl.WHITE)
+        r = pad_rect(t.rect(), -5)
+        rl.draw_rectangle_rounded(r, 0.1, 5, rl.LIGHTGRAY)
+        t.draw()
+
+class TextMessage:
+    def __init__(self, text):
+        self.text = text
+        self.gui_text = Text(self.text, (0, 0), origin=(0, 0), color=rl.DARKGRAY)
+
+    @property
+    def height(self):
+        m = self.gui_text.measure().y
+        return m + 20
+
+    def draw(self, pos):
+        self.gui_text.anchor_point = pos
+        r = pad_rect(self.gui_text.rect(), -5)
+        rl.draw_rectangle_rounded(r, 0.1, 5, rl.WHITE)
+        rl.draw_triangle(
+            (r.x, r.y + r.height + 4),
+            (r.x + 14 + 10, r.y + r.height - 10),
+            (r.x + 5 + 10, r.y + r.height - 10 - 10),
+            rl.WHITE)
+        self.gui_text.draw()
 
 class Phone:
     def __init__(self):
@@ -248,9 +281,10 @@ class Phone:
         self.scan_coro = None
         self.unit_system = 'imperial'
         self.page = 0
-        self.pages = 3
+        self.pages = 4
         self.last_pic = None
         self.pic_contents = set()
+        self.messages = []
 
     def show(self):
         self._is_showing = True
@@ -258,7 +292,7 @@ class Phone:
 
     @property
     def is_camera_active(self):
-        return self._is_showing and self.page == 1
+        return self._is_showing and self.page == 2
 
     @property
     def screen_rect(self):
@@ -455,11 +489,34 @@ def player_origin():
 def player_irec():
     return rl.Rectangle(int(state.player.x), int(state.player.y), PLAYER_SIZE, PLAYER_SIZE)
 
+@dataclass
+class Text:
+    text: str
+    anchor_point: vec2
+    origin: tuple[float, float] = (0.5, 0.5)
+    size: int = 24
+    color: rl.Color = rl.WHITE
+    spacing: float = 1.3
+
+    def measure(self):
+        return rl.measure_text_ex(font, self.text, self.size, self.spacing)
+
+    def pos(self):
+        v = self.measure()
+        try:
+            return self.anchor_point[0] - v.x * self.origin[0], self.anchor_point[1] - v.y * self.origin[1]
+        except:
+            breakpoint()
+
+    def rect(self):
+        v = self.measure()
+        return rl.Rectangle(*self.pos(), v.x, v.y)
+
+    def draw(self):
+        rl.draw_text_ex(font, self.text, self.pos(), self.size, self.spacing, self.color)
+
 def draw_text(text, pos, origin=(0.5, 0.5), size=24, color=rl.WHITE):
-    spacing = 1.3
-    v = rl.measure_text_ex(font, text, size, spacing)
-    pos = (pos[0] - v.x * origin[0], pos[1] - v.y * origin[1])
-    rl.draw_text_ex(font, text, (pos[0], pos[1]), size, spacing, color)
+    Text(text, pos, origin, size, color).draw()
 
 def dead_loop():
     rl.stop_sound(sounds.howl)
@@ -591,12 +648,45 @@ def intro_loop():
         draw_text("(press space to continue)", (WIDTH // 2, HEIGHT // 2 + 48), size=24)
         rl.end_drawing()
 
+def send_message(phone, text):
+    yield from wait_time(random.uniform(0, 2))
+    phone.messages.append(StatusMessage("."))
+    for _ in wait_time(len(text) / 12):
+        phone.messages[-1] = StatusMessage(".")
+        yield from wait_time(0.3)
+        phone.messages[-1] = StatusMessage("..")
+        yield from wait_time(0.3)
+        phone.messages[-1] = StatusMessage("...")
+        yield from wait_time(0.3)
+    phone.messages.pop()
+    phone.messages.append(TextMessage(text))
+
+def messages1(phone):
+    yield from send_message(phone, textwrap.dedent("""\
+                                            so, this station
+                                            is haunted by
+                                            ANGRY BOB
+                                            the ghost of a used
+                                            car salesman who just
+                                            hated public transit"""))
+    yield from send_message(phone, "it's your job to\nget him :)")
+    yield from send_message(phone, "i got u setup with\nthe state of the art\nGHOSTVAC")
+    yield from send_message(phone, "just piss off that\nghost, run back to the\nvac and it'll do the rest\n:)")
+    yield from send_message(phone, "oh, to piss it off\njust take a selfie\nwhen your in range")
+    yield from send_message(phone, "most ghosts hate\nthat lulz")
+    yield from send_message(phone, "gl bro!")
+
+def messages2(phone):
+    yield from send_message(phone, "k for this one")
+    yield from send_message(phone, "k for this one")
 
 maps = []
 for p in ("station1.json", "station2.json", "station3.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
-maps[0].ghostvac_name = "DAVE"
+maps[0].ghostvac_name = "ROB"
+maps[0].messages_func = messages1
+maps[1].messages_func = messages2
 
 class GuiRow:
     def __init__(self, container_rect):
@@ -618,12 +708,24 @@ class GuiRow:
         width = self.container.width if width is None else width
         return rl.Rectangle(self.container.x + (self.container.width - width) / 2, y, width, height)
 
-    def rect_left(self):
+    def rect_remainder(self):
         return rl.Rectangle(self.container.x, self.y, self.container.width, self.container.height - (self.container.y - self.y))
 
     def row_vec2(self, height, origin=(0, 0)):
         y, height = self._make_space(height)
         return vec2(self.container.x + self.container.width * origin[0], y + origin[1] * height)
+
+# HACK
+panel_scroll = rl.Vector2()
+panel_view = rl.Rectangle()
+@contextmanager
+def scroll_panel(rect, title, content_height):
+    rl.gui_scroll_panel(rect, title, rl.Rectangle(0, 0, rect.width - 15, content_height), panel_scroll, panel_view)
+    rl.begin_scissor_mode(int(panel_view.x), int(panel_view.y), int(panel_view.width), int(panel_view.height))
+    g = GuiRow(rl.Rectangle(rect.x + panel_scroll.x, rect.y + panel_scroll.y, rect.width, content_height))
+    g.row_rect(40)
+    yield g
+    rl.end_scissor_mode()
 
 def game_loop():
     map = maps[0]
@@ -653,6 +755,7 @@ def game_loop():
     pnoise = perlin_noise.PerlinNoise(octaves=5)
 
     phone = Phone()
+    messages_coro = map.messages_func(phone) if map.messages_func else None
     fear = 0
     MAX_HEALTH = 5
     fear_health = MAX_HEALTH
@@ -857,13 +960,20 @@ def game_loop():
         bottom_row = gui.row_rect(-50)
 
         if phone.page == 0:
-            rl.draw_rectangle_rec(gui.rect_left(), rl.PURPLE)
-            draw_text("Apparition Pal", gui.row_vec2(60, origin=(0.5, 0.5)), color=rl.WHITE)
+            rl.draw_rectangle_rec(gui.rect_remainder(), rl.GRAY)
+            gui.row_rect(10)
+            gui.row_rect(-60)
+            with scroll_panel(gui.rect_remainder(), "Messages: donnie", sum(m.height for m in phone.messages) + 10) as panel_gui:
+                for message in phone.messages:
+                    message.draw(panel_gui.row_vec2(message.height) + vec2(10, 0))
+        elif phone.page == 1:
+            rl.draw_rectangle_rec(gui.rect_remainder(), rl.PURPLE)
+            draw_text("Aberration Pal", gui.row_vec2(60, origin=(0.5, 0.5)), color=rl.WHITE)
             if rl.gui_button(gui.row_rect(50, width=120), "Scan"):
                 phone.scan()
             gui.row_rect(10)
-            draw_text(phone.scan_results, gui.row_vec2(30), origin=(0, 0), color=rl.BLACK)
-        elif phone.page == 1:
+            draw_text(phone.scan_results, gui.row_vec2(30) + vec2(5, 0), origin=(0, 0), color=rl.BLACK)
+        elif phone.page == 2:
             rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.Color(220, 220, 255, 255))
             draw_text('CAMERA', gui.row_vec2(30, origin=(0.5, 0.5)), origin=(0.5, 0.5), color=rl.GREEN)
             button_pos = gui.row_vec2(-100, origin=(0.5, 0.5))
@@ -885,6 +995,7 @@ def game_loop():
                         notify(f"Discovered: {hint}")
                         if hint == 'FRED':
                             map.ghostvac_name = "FRED"
+                            rl.play_sound(sounds.bling)
 
 
             last_pic_preview = rl.Rectangle(phone.screen_rect.x + 10, phone.screen_rect.y + 400, 60, 110)
@@ -902,7 +1013,7 @@ def game_loop():
                                 rl.Rectangle(0, 0, icon_width, icon_height),
                                 rl.Rectangle(button_pos.x - icon_width, button_pos.y - icon_height, icon_width * 2, icon_height * 2),
                                 rl.Vector2(0, 0), 0, rl.WHITE)
-        elif phone.page == 2:
+        elif phone.page == 3:
             gui.row_rect(20)
             rl.draw_texture_pro(textures.ghostvac_off,
                                 tex_rect(textures.ghostvac_off),
@@ -936,9 +1047,9 @@ def game_loop():
                     name = rl.ffi.string(input_text).decode("ascii").upper()
                     if name == map.ghost_name:
                         map.ghostvac_name = name
+                        rl.play_sound(sounds.bling)
                 if rl.is_key_released(rl.KEY_ENTER):
                     input_text[0] = b'\0'
-
 
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
@@ -953,13 +1064,20 @@ def game_loop():
         if rl.gui_button(rl.Rectangle(bottom_row.x + bottom_row.width - 50, bottom_row.y, 50, bottom_row.height), "->"):
             phone.page = (phone.page + 1) % phone.pages
         for i in range(phone.pages):
-            center = (bottom_row.x + bottom_row.width / 2 - 20 + (40 / phone.pages) * i,
+            center = (bottom_row.x + bottom_row.width / 2 - 30 + (60 / phone.pages) * i,
                       bottom_row.y + bottom_row.height / 2)
             if i == phone.page:
                 rl.draw_circle_v(center, 5, rl.BLACK)
             else:
                 rl.draw_circle_lines_v(center, 5, rl.BLACK)
         rl.end_scissor_mode()
+
+        # update messages
+        if messages_coro:
+            try:
+                next(messages_coro)
+            except StopIteration:
+                messages_coro = None
 
         if rl.is_key_released(rl.KEY_SPACE):
             input_text[0] = b'\0'
@@ -995,9 +1113,6 @@ def game_loop():
 
 current_func = intro_loop
 current_func = game_loop
-maps.pop(0)
-maps = [0]
-current_func = victory_loop
 
 rl.set_target_fps(60)
 try:
