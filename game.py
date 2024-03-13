@@ -55,6 +55,11 @@ def tex_rect(tex, frames=1, frame_i=0, flipv=False):
     w = tex.width / frames
     return (w*frame_i, 0, w, tex.height * (-1 if flipv else 1))
 
+def rect_to_screen_space(rect):
+    p = rl.get_world_to_screen_2d((rect.x, rect.y), camera)
+    return (p.x, p.y, rect.width, rect.height)
+
+
 def pad_rect(rect, padding):
     return rl.Rectangle(rect.x + padding, rect.y + padding, rect.width - padding * 2, rect.height - padding * 2)
 
@@ -296,9 +301,11 @@ class TextMessage:
 
 class Phone:
     def __init__(self, messages_func):
+        self._is_showing = False
+        self.last_read = 0
+        self.last_read_ttl = 2
         self.hide()
         self.pos_spring = Spring(2, 0.5, 0, self.goal_pos)
-        self._is_showing = False
         self._popup_state = 'hidden'
         self.scan_results = ""
         self.scan_coro = None
@@ -310,9 +317,8 @@ class Phone:
         self.messages = []
         self.discovered = set()
         self.messages_coro = messages_func(self) if messages_func else None
-        self.last_read = 0
-        self.last_read_ttl = 2
         self.puzzle_state = 'hidden'
+        self.clue_textures = [textures.a4, textures.a3, textures.a2, textures.a1]
 
     def add_message(self, msg):
         self.messages.append(msg)
@@ -557,7 +563,14 @@ class Text:
         rl.draw_text_ex(font, self.text, self.pos(), self.size, self.spacing, self.color)
 
 def draw_text(text, pos, origin=(0.5, 0.5), size=24, color=rl.WHITE):
-    Text(text, pos, origin, size, color).draw()
+    t = Text(text, pos, origin, size, color)
+    t.draw()
+    return t
+
+def draw_todo_item(text, pos, is_done, origin=(0.5, 0.5)):
+    t = draw_text(text, pos, origin, color=rl.BLACK)
+    if is_done:
+        rl.draw_line_ex((pos[0], pos[1]), (vec2(t.measure().x + 20, 0) + pos).to_tuple(), 3, rl.BLACK)
 
 def dead_loop():
     rl.stop_sound(sounds.howl)
@@ -607,7 +620,7 @@ def victory_loop():
         text = "You caught the aberration!"
         yield from wait_time(4)
         if maps:
-            text = "On to the next station:"
+            text = "Next station:"
             yield from wait_time(4, allow_skip=True)
             text = f"This is {maps[0].name}"
             yield from wait_time(4, allow_skip=True)
@@ -666,13 +679,13 @@ def intro_loop():
     text = ""
     def coro():
         nonlocal text
-        text = "Find the ghost, then return to the entrance."
+        text = "1. Find the ghost"
         yield from wait_for_key_press()
-        text = "<SPACE> sends a pulse to detect abberations"
+        text = "2. Anger it by taking its picture"
         yield from wait_for_key_press()
-        text = "<X> pisses off the ghost when you're in range"
+        text = "3. Run back to your GHOSTVAC to capture it"
         yield from wait_for_key_press()
-        text = "Don't get caught."
+        text = "<SPACE> shows/hides your phone"
         yield from wait_for_key_press()
         text = f"This is {maps[0].name}"
         yield from wait_time(4, allow_skip=True)
@@ -708,6 +721,7 @@ def send_message(phone, text, skip_wait=False):
         phone.last_read = len(phone.messages)
 
 def messages1(phone):
+    notify("<space> shows/hides your phone")
     yield from send_message(phone, textwrap.dedent("""\
                                             so, this station
                                             is haunted by
@@ -715,10 +729,9 @@ def messages1(phone):
                                             the ghost of a used
                                             car salesman who just
                                             hated public transit"""), skip_wait=True)
-    yield from send_message(phone, "it's your job to\nget him :)")
     yield from send_message(phone, "i got u setup with\nthe state of the art\nGHOSTVAC")
     yield from send_message(phone, "just piss off that\nghost, run back to the\nvac and it'll do the rest\n:)")
-    yield from send_message(phone, "oh, to piss it off\njust take a selfie\nwhen your in range")
+    yield from send_message(phone, "oh, to piss it off\njust take a pic of it")
     yield from send_message(phone, "most ghosts hate\nthat lulz")
     yield from send_message(phone, "gl bro!")
 
@@ -738,11 +751,10 @@ def hint_dialog_coro(phone, hint_dialog):
 def messages2(phone):
     yield from send_message(phone, textwrap.dedent("""\
                                                    uh.. i don't know
-                                                   what the name of the
-                                                   ghost is."""), skip_wait=True)
-    yield from send_message(phone, "so the vac won't work")
+                                                   the name of the ghost."""), skip_wait=True)
+    yield from send_message(phone, "so the vac won't work\nuntil it's locked onto\na name")
     yield from send_message(phone, "you gotta get his name\nsomehow...")
-    yield from send_message(phone, "don't piss him off\nbefore you find it!")
+    yield from send_message(phone, "use your camera to\ncollect clues!")
 
     hint_dialog = {
         'FRED': ["YO nice, it's FRED", "i've activated the vac"],
@@ -775,8 +787,8 @@ def messages3(phone):
 
     hint_dialog = {
         'HI': ['"HI"?', "uh. maybe it's friendly?"],
-        'AI': ["uggh no", "AI is banned", "we're not getting into\nthat"],
-        'SICKLE T': ["uhh that sickle isn't\nominous at all", "don't freak out man,\nit'll be ok", "yeah", "it'll be fine"],
+        'AI': ["AI...?"],
+        'SICKLE T': ["uhh that sickle isn't\nominous at all"],
         'JR': ["just a junior ghost?"],
         }
     yield from hint_dialog_coro(phone, hint_dialog)
@@ -791,7 +803,7 @@ maps = []
 for p in ("station1.json", "station2.json", "station3.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
-maps[0].ghostvac_name = "ROB"
+maps[0].ghostvac_name = "BOB"
 maps[0].messages_func = messages1
 maps[1].messages_func = messages2
 maps[2].messages_func = messages3
@@ -836,10 +848,16 @@ def scroll_panel(rect, title, content_height):
     rl.end_scissor_mode()
 
 notifications = []
-def notify(text):
+notifications_shown = set()
+def notify(text, once=False):
     global notifications
+    if text in notifications_shown:
+        return
+    notifications_shown.add(text)
     notifications = notifications[:4]
     notifications.append((5, text))
+
+
 
 
 def game_loop():
@@ -865,7 +883,7 @@ def game_loop():
     state.ghost_target = vec2(0, 0)
     state.target_ttl = 0
     state.ghost_state = 'wandering'
-    notifications.clear()
+    #notifications.clear()
 
     pnoise = perlin_noise.PerlinNoise(octaves=5)
 
@@ -887,8 +905,6 @@ def game_loop():
 
     rl.play_music_stream(bg_soundscape)
     rl.play_music_stream(scared_loop)
-
-    clue_textures = [textures.a4, textures.a3, textures.a2, textures.a1]
 
     while not rl.window_should_close():
         #prof = Profiler()
@@ -918,6 +934,14 @@ def game_loop():
             fear_health = min(fear_health + 0.3 * rl.get_frame_time(), MAX_HEALTH)
         if fear_health <= 0:
             current_func = dead_loop
+
+            if map.ghostvac_name is None:
+                notify("hint: you need to discover the ghost name before triggering it", once=True)
+                phone.add_message(TextMessage("noo, dude you\ngotta find the\nghost's name before\ntriggering it."))
+                phone.add_message(TextMessage("use your camera\nto snap clues!"))
+            else:
+                notify("hint: run back to the GHOSTVAC before the ghost catches you", once=True)
+
             return
 
         #if rl.is_key_released(rl.KEY_X):
@@ -1052,6 +1076,23 @@ def game_loop():
         rl.set_shader_value(flashlight_shader, loc, rl.Vector2(p.x, HEIGHT - p.y), rl.SHADER_UNIFORM_VEC2)
         render_with_shader(canvas, canvas2, flashlight_shader)
 
+        # render ghost for cam
+        if state.ghost_state == 'wandering':
+            frame_width = textures.ghosthappy.width / 3
+            frame_i = int((rl.get_time() * 15) % 4)
+            rl.begin_texture_mode(canvas)
+            rl.draw_texture_pro(textures.ghosthappy,
+                                (frame_width * frame_i,
+                                 0,
+                                 frame_width * (-1 if state.ghost_target.x < state.ghost_pos.x else 1),
+                                 textures.ghosthappy.height),
+                                rect_to_screen_space(ghost_rect()),
+                                (0, 0),
+                                0,
+                                rl.fade(rl.WHITE, 0.5))
+            rl.end_texture_mode()
+
+
         rl.begin_texture_mode(canvas2)
         # draw phone ui
         rl.draw_rectangle_rounded(phone.rect, 0.1, 5, rl.WHITE)
@@ -1083,13 +1124,18 @@ def game_loop():
                 phone.scan()
             gui.row_rect(10)
             draw_text(phone.scan_results, gui.row_vec2(30) + vec2(5, 0), origin=(0, 0), color=rl.BLACK)
+            draw_text("TODO", gui.row_vec2(30) + vec2(5, 0), origin=(0, 0), color=rl.BLACK)
+            draw_todo_item("- discover ghost name", gui.row_vec2(30) + vec2(5, 0), origin=(0, 0.5), is_done=map.ghostvac_name is not None)
+            draw_todo_item("- trigger ghost", gui.row_vec2(30) + vec2(5, 0), origin=(0, 0.5), is_done=state.ghost_state != 'wandering')
+            draw_todo_item("- capture in vac", gui.row_vec2(30) + vec2(5, 0), origin=(0, 0.5), is_done=state.ghost_state == 'sucked')
+            draw_todo_item("- leave the station", gui.row_vec2(30) + vec2(5, 0), origin=(0, 0.5), is_done=False)
             row = gui.row_rect(textures.a1.height)
             if phone.puzzle_state == 'solving' or phone.puzzle_state == 'solved':
-                for i, tex in enumerate(clue_textures):
+                for i, tex in enumerate(phone.clue_textures):
                     w = tex.width * SCALE
                     h = tex.height * SCALE
                     cw = (w + (3 if phone.puzzle_state == 'solving' else 0))
-                    x = row.x + i * cw + (row.width - (cw * len(clue_textures))) / 2
+                    x = row.x + i * cw + (row.width - (cw * len(phone.clue_textures))) / 2
                     rl.draw_texture_pro(tex,
                                         tex_rect(tex),
                                         (x, row.y, w, h),
@@ -1098,15 +1144,16 @@ def game_loop():
                                         rl.WHITE)
 
                     if phone.puzzle_state == 'solving':
-                        if i < len(clue_textures)-1 and rl.gui_button((x + w - 20, row.y + h + 20, 40, 20), "<>"):
-                            other = (i + 1) % len(clue_textures)
-                            clue_textures[i], clue_textures[other] = clue_textures[other], clue_textures[i]
-                if phone.puzzle_state == 'solving' and clue_textures == [textures.a1, textures.a2, textures.a3, textures.a4]:
+                        if i < len(phone.clue_textures)-1 and rl.gui_button((x + w - 20, row.y + h + 20, 40, 20), "<>"):
+                            other = (i + 1) % len(phone.clue_textures)
+                            phone.clue_textures[i], phone.clue_textures[other] = phone.clue_textures[other], phone.clue_textures[i]
+                if phone.puzzle_state == 'solving' and phone.clue_textures == [textures.a1, textures.a2, textures.a3, textures.a4]:
                     phone.puzzle_state = 'solved'
                     map.ghostvac_name = "ARTHUR"
 
         elif phone.page == 2:
             rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.Color(220, 220, 255, 255))
+
             draw_text('CAMERA', gui.row_vec2(30, origin=(0.5, 0.5)), origin=(0.5, 0.5), color=rl.GREEN)
             button_pos = gui.row_vec2(-100, origin=(0.5, 0.5))
             if rl.gui_button(rl.Rectangle(button_pos.x - 20, button_pos.y - 20, 40, 40), ""):
@@ -1218,7 +1265,8 @@ def game_loop():
         rl.end_drawing()
 
 current_func = intro_loop
-current_func = game_loop
+#current_func = game_loop
+#maps.pop(0)
 
 rl.set_target_fps(60)
 try:
