@@ -195,30 +195,30 @@ WIDTH, HEIGHT = 300 * SCALE, 200 * SCALE
 rl.init_window(WIDTH, HEIGHT, "Aberration Station")
 rl.init_audio_device()
 
-font = rl.load_font_ex("mago3.ttf", 24, None, 0)
+font = rl.load_font_ex("resources/mago3.ttf", 24, None, 0)
 rl.gui_set_font(font)
 rl.gui_set_style(rl.DEFAULT, rl.TEXT_SIZE, 24)
 
 textures = SimpleNamespace()
-for f in os.listdir('.'):
+for f in os.listdir('resources'):
     if f.endswith('.png'):
-        setattr(textures, f.removesuffix('.png'), rl.load_texture(f))
+        setattr(textures, f.removesuffix('.png'), rl.load_texture('resources/' + f))
 
 # setup repeat sounds
 sounds = SimpleNamespace()
-sound_files = {x for x in os.listdir('.') if x.endswith('.wav')}
+sound_files = {x for x in os.listdir('resources') if x.endswith('.wav')}
 repeats = {(g.group(1), x) for x in sound_files if (g := re.search(r'(\w+)_(\d+)\.wav$', x))}
 for k, g in itertools.groupby(sorted(repeats), key=lambda x: x[0]):
-    setattr(sounds, k, [rl.load_sound(x[1]) for x in g])
+    setattr(sounds, k, [rl.load_sound('resources/' + x[1]) for x in g])
 sound_files -= repeats
 for f in sound_files:
-    setattr(sounds, f.removesuffix('.wav'), rl.load_sound(f))
+    setattr(sounds, f.removesuffix('.wav'), rl.load_sound('resources/' + f))
 
 rl.set_sound_volume(sounds.notify, 0.3)
 
-bg_soundscape = rl.load_music_stream("bg.ogg")
-scared_loop = rl.load_music_stream("scared_loop.ogg")
-victory_music = rl.load_music_stream("victory.ogg")
+bg_soundscape = rl.load_music_stream("resources/bg.ogg")
+scared_loop = rl.load_music_stream("resources/scared_loop.ogg")
+victory_music = rl.load_music_stream("resources/victory.ogg")
 victory_music.looping = False
 
 GHOST_TRAIL_TTL = 2
@@ -751,9 +751,9 @@ def hint_dialog_coro(phone, hint_dialog):
 def messages2(phone):
     yield from send_message(phone, textwrap.dedent("""\
                                                    uh.. i don't know
-                                                   the name of the ghost."""), skip_wait=True)
-    yield from send_message(phone, "so the vac won't work\nuntil it's locked onto\na name")
-    yield from send_message(phone, "you gotta get his name\nsomehow...")
+                                                   the name of the ghost
+                                                   so the vac won't work"""), skip_wait=True)
+    yield from send_message(phone, "(it needs a name\nto lock on)")
     yield from send_message(phone, "use your camera to\ncollect clues!")
 
     hint_dialog = {
@@ -800,7 +800,7 @@ def messages3(phone):
 
 
 maps = []
-for p in ("station1.json", "station2.json", "station3.json"):
+for p in ("resources/station1.json", "resources/station2.json", "resources/station3.json"):
     with open(p) as f:
         maps.append(Map(json.load(f)))
 maps[0].ghostvac_name = "BOB"
