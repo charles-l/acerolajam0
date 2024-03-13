@@ -14,6 +14,7 @@ import re
 from contextlib import contextmanager
 import perlin_noise
 import textwrap
+#from pyinstrument import Profiler
 
 PLAYER_SIZE = 16
 TILE_SIZE = 16
@@ -22,7 +23,7 @@ SUCK_RANGE=100
 assert SUCK_RANGE > ENRAGE_RANGE
 
 class SpatialHash:
-    cell_size = 128
+    cell_size = 64
     recs: list[rl.Rectangle]
     def __init__(self, recs):
         self.recs = recs
@@ -63,7 +64,6 @@ class Map:
             return r
 
         self.name = map_json["values"]["StationName"]
-        self.ghost_name = map_json["values"]["GhostName"]
         self.entities = get_layer("Entities")["entities"]
         self.decals = get_layer("Decals")["decals"]
         self.hints = []
@@ -104,26 +104,29 @@ class Map:
 
 
     def draw(self):
-        # bg layer
-        for x, y, tile in tiles_around(self.bg, ivec2(state.player // TILE_SIZE)):
-            if tile == -1:
-                continue
-            rl.draw_texture_pro(textures.tiles,
-                                rl.Rectangle(tile * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE),
-                                rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
-                                rl.Vector2(),
-                                0,
-                                rl.WHITE)
+        tile_coord = (state.player // TILE_SIZE).to_tuple()
+        around = 8
+        ys = range(int(max(0, tile_coord[1]-around)), int(min(len(self.bg), tile_coord[1]+around)))
+        xs = range(int(max(0, tile_coord[0]-around)), int(min(len(self.bg[0]), tile_coord[0]+around)))
+        for y in ys:
+            for x in xs:
+                bgtile = self.bg[y][x]
+                walltile = self.walls[y][x]
+                if walltile != -1:
+                    rl.draw_texture_pro(textures.tiles,
+                                        (walltile * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE),
+                                        (x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+                                        (0, 0),
+                                        0,
+                                        rl.WHITE)
+                elif bgtile != -1:
+                    rl.draw_texture_pro(textures.tiles,
+                                        (bgtile * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE),
+                                        (x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+                                        (0, 0),
+                                        0,
+                                        rl.WHITE)
 
-        for x, y, tile in tiles_around(self.walls, ivec2(state.player // TILE_SIZE)):
-            if tile == -1:
-                continue
-            rl.draw_texture_pro(textures.tiles,
-                                rl.Rectangle(tile * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE),
-                                rl.Rectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
-                                rl.Vector2(),
-                                0,
-                                rl.WHITE)
 
         for decal in self.decals:
             rl.draw_texture(decal["texture"], int(decal["x"]), int(decal["y"]), rl.WHITE)
@@ -157,6 +160,7 @@ class Map:
 
     def resolve_collisions(self, entity_pos, entity_size=(TILE_SIZE, TILE_SIZE)):
         entity_rec = rl.Rectangle(entity_pos[0], entity_pos[1], entity_size[0], entity_size[1])
+
         if (p := util.resolve_map_collision(self.wall_recs.near(entity_pos) + [t.rec for t in self.turnstiles if t.locked], entity_rec)) is not None:
             entity_pos[0], entity_pos[1] = p[0], p[1]
 
@@ -195,7 +199,7 @@ victory_music.looping = False
 
 GHOST_TRAIL_TTL = 2
 
-state = SimpleNamespace()
+state = SimpleNamespace(phone=None)
 
 camera = rl.Camera2D(
     (WIDTH // SCALE // 2, HEIGHT // SCALE // 2),
@@ -272,7 +276,7 @@ class TextMessage:
         self.gui_text.draw()
 
 class Phone:
-    def __init__(self):
+    def __init__(self, messages_func):
         self.hide()
         self.pos_spring = Spring(2, 0.5, 0, self.goal_pos)
         self._is_showing = False
@@ -285,6 +289,8 @@ class Phone:
         self.last_pic = None
         self.pic_contents = set()
         self.messages = []
+        self.discovered = set()
+        self.messages_coro = messages_func(self)
 
     def show(self):
         self._is_showing = True
@@ -326,6 +332,13 @@ class Phone:
             self._popup_state = 'hidden'
         if self._popup_state == 'updated':
             self._popup_state = 'idle'
+
+        # update messages
+        if self.messages_coro:
+            try:
+                next(self.messages_coro)
+            except StopIteration:
+                self.messages_coro = None
 
     def pixels_to_dist(self, pixels):
         meters = (pixels / 32)
@@ -473,7 +486,7 @@ void main()
     """.replace("{WIDTH}", str(WIDTH)).replace("{HEIGHT}", str(HEIGHT))
     )
 
-def tiles_around(tiles_2d, tile_coord, around = 10):
+def tiles_around(tile_coord, around = 10):
     ys = range(int(max(0, tile_coord[1]-around)), int(min(len(tiles_2d), tile_coord[1]+around)))
     xs = range(int(max(0, tile_coord[0]-around)), int(min(len(tiles_2d[0]), tile_coord[0]+around)))
     for y in ys:
@@ -556,6 +569,7 @@ def dead_loop():
 
 def victory_loop():
     maps.pop(0)
+    state.phone = None # reset phone for next level
     rl.stop_sound(sounds.howl)
     rl.play_music_stream(victory_music)
     text = ""
@@ -648,17 +662,19 @@ def intro_loop():
         draw_text("(press space to continue)", (WIDTH // 2, HEIGHT // 2 + 48), size=24)
         rl.end_drawing()
 
-def send_message(phone, text):
-    yield from wait_time(random.uniform(0, 2))
-    phone.messages.append(StatusMessage("."))
-    for _ in wait_time(len(text) / 12):
-        phone.messages[-1] = StatusMessage(".")
-        yield from wait_time(0.3)
-        phone.messages[-1] = StatusMessage("..")
-        yield from wait_time(0.3)
-        phone.messages[-1] = StatusMessage("...")
-        yield from wait_time(0.3)
-    phone.messages.pop()
+def send_message(phone, text, skip_wait=False):
+    if not skip_wait:
+        yield from wait_time(random.uniform(0, 2))
+        phone.messages.append(StatusMessage("."))
+        for _ in wait_time(len(text) / 12):
+            phone.messages[-1] = StatusMessage(".")
+            yield from wait_time(0.3)
+            phone.messages[-1] = StatusMessage("..")
+            yield from wait_time(0.3)
+            phone.messages[-1] = StatusMessage("...")
+            yield from wait_time(0.3)
+        phone.messages.pop()
+    rl.play_sound(sounds.notify)
     phone.messages.append(TextMessage(text))
 
 def messages1(phone):
@@ -668,7 +684,7 @@ def messages1(phone):
                                             ANGRY BOB
                                             the ghost of a used
                                             car salesman who just
-                                            hated public transit"""))
+                                            hated public transit"""), skip_wait=True)
     yield from send_message(phone, "it's your job to\nget him :)")
     yield from send_message(phone, "i got u setup with\nthe state of the art\nGHOSTVAC")
     yield from send_message(phone, "just piss off that\nghost, run back to the\nvac and it'll do the rest\n:)")
@@ -677,8 +693,27 @@ def messages1(phone):
     yield from send_message(phone, "gl bro!")
 
 def messages2(phone):
-    yield from send_message(phone, "k for this one")
-    yield from send_message(phone, "k for this one")
+    yield from send_message(phone, textwrap.dedent("""\
+                                                   uh.. i don't know
+                                                   what the name of the
+                                                   ghost is."""), skip_wait=True)
+    yield from send_message(phone, "so the vac won't work")
+    yield from send_message(phone, "you gotta get his name\nsomehow...")
+    yield from send_message(phone, "don't piss him off\nbefore you find it!")
+
+    hint_dialog = {
+        'FRED': ["YO nice, it's FRED", "i've activated the vac"],
+        'DEAD': ["uh yehh he's dead.", "we already knew that."],
+        }
+    while hint_dialog:
+        for hint in hint_dialog:
+            if hint in phone.discovered:
+                for line in hint_dialog[hint]:
+                    yield from send_message(phone, line)
+                del hint_dialog[hint]
+            else:
+                yield
+
 
 maps = []
 for p in ("station1.json", "station2.json", "station3.json"):
@@ -754,8 +789,7 @@ def game_loop():
 
     pnoise = perlin_noise.PerlinNoise(octaves=5)
 
-    phone = Phone()
-    messages_coro = map.messages_func(phone) if map.messages_func else None
+    state.phone = state.phone or Phone(map.messages_func or None)
     fear = 0
     MAX_HEALTH = 5
     fear_health = MAX_HEALTH
@@ -779,12 +813,13 @@ def game_loop():
     rl.play_music_stream(bg_soundscape)
     rl.play_music_stream(scared_loop)
 
-    input_text = rl.ffi.new("char[20]")
     while not rl.window_should_close():
+        #prof = Profiler()
+        #prof.start()
         rl.update_music_stream(bg_soundscape)
         rl.update_music_stream(scared_loop)
         rl.set_music_volume(scared_loop, clamp((1 - (fear_health / MAX_HEALTH)) * 2, 0, 1))
-        update_time = time.time()
+        phone = state.phone
         input = vec2()
         if rl.is_key_down(rl.KEY_DOWN): input.y += 1
         if rl.is_key_down(rl.KEY_UP): input.y -= 1
@@ -887,18 +922,12 @@ def game_loop():
             rl.play_sound(sounds.beep)
         phone.update(rl.get_frame_time(), shake * 20 * shake_amt)
 
-        update_time = (time.time() - update_time) * 1000
-
         # draw
-        draw_time = time.time()
         rl.begin_texture_mode(canvas)
         rl.begin_mode_2d(camera)
         rl.clear_background(rl.BLACK)
 
         map.draw()
-
-        #for rec in map.wall_recs.near(state.player):
-        #    rl.draw_rectangle_lines_ex(rec, 1, rl.RED)
 
         add_texture_sorted(textures.hero, (0, 0, (-1 if last_dir.x < 0 else 1) * TILE_SIZE, TILE_SIZE), draw_rec)
 
@@ -935,8 +964,6 @@ def game_loop():
 
         rl.end_mode_2d()
         rl.end_texture_mode()
-
-        draw_time = (time.time() - draw_time) * 1000
 
         loc = rl.get_shader_location(flashlight_shader, "pos")
         # lerp light
@@ -996,6 +1023,7 @@ def game_loop():
                         if hint == 'FRED':
                             map.ghostvac_name = "FRED"
                             rl.play_sound(sounds.bling)
+                        phone.discovered.add(hint)
 
 
             last_pic_preview = rl.Rectangle(phone.screen_rect.x + 10, phone.screen_rect.y + 400, 60, 110)
@@ -1034,23 +1062,6 @@ def game_loop():
                 draw_text("Status: INACTIVE", gui.row_vec2(30, origin=(0.5, 0.5)), color=rl.RED)
                 draw_text("Required: TARGET NAME", gui.row_vec2(15, origin=(0.5, 0.5)), color=rl.GRAY)
 
-                # FIXME: don't use raygui for this since we can't control which keys are forwarded
-
-                draw_text("Enter your guess:", gui.row_vec2(20, origin=(0.5, 0.5)), color=rl.GRAY)
-                gui.row_rect(20)
-                if rl.gui_text_box(
-                    gui.row_rect(40, 120),
-                    rl.ffi.cast("char*", input_text),
-                    len(input_text),
-                    True,
-                ):
-                    name = rl.ffi.string(input_text).decode("ascii").upper()
-                    if name == map.ghost_name:
-                        map.ghostvac_name = name
-                        rl.play_sound(sounds.bling)
-                if rl.is_key_released(rl.KEY_ENTER):
-                    input_text[0] = b'\0'
-
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
                 with phone.popup("Pay fare?", gui.row_rect(140)) as p:
@@ -1072,15 +1083,7 @@ def game_loop():
                 rl.draw_circle_lines_v(center, 5, rl.BLACK)
         rl.end_scissor_mode()
 
-        # update messages
-        if messages_coro:
-            try:
-                next(messages_coro)
-            except StopIteration:
-                messages_coro = None
-
         if rl.is_key_released(rl.KEY_SPACE):
-            input_text[0] = b'\0'
             if phone._is_showing:
                 phone.hide()
             else:
@@ -1101,19 +1104,18 @@ def game_loop():
         rl.begin_shader_mode(chromatic_aberration)
         rl.draw_texture_pro(canvas2.texture, rl.Rectangle(0, 0, WIDTH, -HEIGHT), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.WHITE)
         rl.end_shader_mode()
+        #prof.stop()
+        #if rl.get_frame_time() > 0.017:
+        #    prof.print(show_all=True, timeline=True)
 
         rl.draw_fps(10, 10)
-        rl.draw_text(f"update: {update_time:0.8f}", 10, 30, 20, rl.WHITE)
-        rl.draw_text(f"draw: {draw_time:0.8f}", 10, 50, 20, rl.WHITE)
-        rl.draw_text(f"wait_time: {wait_time:0.8f}", 10, 70, 20, rl.WHITE)
-        wait_time = time.time()
 
         rl.end_drawing()
-        wait_time = (time.time() - wait_time) * 1000
 
 current_func = intro_loop
 current_func = game_loop
 
+maps.pop(0)
 rl.set_target_fps(60)
 try:
     while not rl.window_should_close():
