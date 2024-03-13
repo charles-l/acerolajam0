@@ -220,6 +220,8 @@ bg_soundscape = rl.load_music_stream("resources/bg.ogg")
 scared_loop = rl.load_music_stream("resources/scared_loop.ogg")
 victory_music = rl.load_music_stream("resources/victory.ogg")
 victory_music.looping = False
+victory_music_final = rl.load_music_stream("resources/victory_final.ogg")
+victory_music_final.looping = True
 
 GHOST_TRAIL_TTL = 2
 
@@ -630,7 +632,10 @@ def victory_loop():
             victory_dance_frames = 8
             width = int(textures.victory_dance.width / victory_dance_frames)
             height = textures.victory_dance.height
+
+            rl.play_music_stream(victory_music_final)
             while True:
+                rl.update_music_stream(victory_music_final)
                 frame = int((10 * rl.get_time()) % victory_dance_frames)
                 rl.draw_texture_pro(textures.victory_dance,
                                     rl.Rectangle(width * frame, 0, width, height),
@@ -1268,6 +1273,7 @@ def game_loop():
         rl.draw_fps(10, 10)
 
         rl.end_drawing()
+
 
 current_func = intro_loop
 
