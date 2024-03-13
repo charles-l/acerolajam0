@@ -49,9 +49,11 @@ def add_texture_sorted(tex, src_rect, dest_rec):
 class Turnstile:
     rec: rl.Rectangle
     locked: bool = True
+    unlock_time = 0
 
-def tex_rect(tex, flipv=False):
-    return (0, 0, tex.width, tex.height * (-1 if flipv else 1))
+def tex_rect(tex, frames=1, frame_i=0, flipv=False):
+    w = tex.width / frames
+    return (w*frame_i, 0, w, tex.height * (-1 if flipv else 1))
 
 def pad_rect(rect, padding):
     return rl.Rectangle(rect.x + padding, rect.y + padding, rect.width - padding * 2, rect.height - padding * 2)
@@ -133,9 +135,24 @@ class Map:
 
         for t in self.turnstiles:
             if t.locked:
-                rl.draw_rectangle_rec(t.rec, rl.LIGHTGRAY)
+                rl.draw_texture_pro(
+                    textures.turnstile,
+                    tex_rect(textures.turnstile, frames=2, frame_i=0),
+                    t.rec,
+                    (0, 0),
+                    0,
+                    rl.WHITE)
             else:
-                rl.draw_rectangle_lines_ex(t.rec, 1, rl.LIGHTGRAY)
+                rl.draw_texture_pro(
+                    textures.turnstile,
+                    tex_rect(textures.turnstile, frames=2, frame_i=1),
+                    t.rec,
+                    (0, 0),
+                    0,
+                    rl.WHITE)
+                t.unlock_time -= rl.get_frame_time()
+                if t.unlock_time < 0:
+                    t.locked = True
 
         for i in range(len(self.ghostvac_cable)-1):
             rl.draw_line_bezier(self.ghostvac_cable[i], self.ghostvac_cable[i+1], 2, rl.DARKPURPLE)
@@ -1151,9 +1168,10 @@ def game_loop():
 
         for t in map.turnstiles:
             if length(player_origin() - (t.rec.x + TILE_SIZE / 2, t.rec.y + TILE_SIZE / 2)) < 20 and t.locked:
-                with phone.popup("Pay fare?", gui.row_rect(140)) as p:
-                    if rl.gui_button(rl.Rectangle(p.x, p.y, 250, 50), "Unlock turnstile"):
+                with phone.popup("Unlock turnstile?", gui.row_rect(140)) as p:
+                    if rl.gui_button(rl.Rectangle(p.x, p.y, 250, 50), "Swipe transit card"):
                         t.locked = False
+                        t.unlock_time = 8
                         phone.hide()
                         rl.play_sound(sounds.turnstile)
 
@@ -1202,8 +1220,6 @@ def game_loop():
 current_func = intro_loop
 current_func = game_loop
 
-maps.pop(0)
-maps.pop(0)
 rl.set_target_fps(60)
 try:
     while not rl.window_should_close():
