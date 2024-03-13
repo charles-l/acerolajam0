@@ -936,7 +936,7 @@ def game_loop():
             current_func = dead_loop
 
             if map.ghostvac_name is None:
-                notify("hint: you need to discover the ghost name before triggering it", once=True)
+                notify("hint: you need to discover the ghost name before taking it's pic", once=True)
                 phone.add_message(TextMessage("noo, dude you\ngotta find the\nghost's name before\ntriggering it."))
                 phone.add_message(TextMessage("use your camera\nto snap clues!"))
             else:
@@ -1006,7 +1006,7 @@ def game_loop():
 
         elif state.ghost_state == 'enraged':
             state.ghost_target = state.player
-            if ghost_to_vac_dist < SUCK_RANGE:
+            if map.ghostvac_name is not None and ghost_to_vac_dist < SUCK_RANGE:
                 state.ghost_state = 'sucking'
                 rl.play_sound(sounds.vacuum)
         elif state.ghost_state == 'sucking':
