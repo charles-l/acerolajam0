@@ -51,7 +51,7 @@ class Turnstile:
     locked: bool = True
 
 def tex_rect(tex, flipv=False):
-    return rl.Rectangle(0, 0, tex.width, tex.height * (-1 if flipv else 1))
+    return (0, 0, tex.width, tex.height * (-1 if flipv else 1))
 
 def pad_rect(rect, padding):
     return rl.Rectangle(rect.x + padding, rect.y + padding, rect.width - padding * 2, rect.height - padding * 2)
@@ -295,6 +295,7 @@ class Phone:
         self.messages_coro = messages_func(self) if messages_func else None
         self.last_read = 0
         self.last_read_ttl = 2
+        self.puzzle_state = 'hidden'
 
     def add_message(self, msg):
         self.messages.append(msg)
@@ -704,6 +705,19 @@ def messages1(phone):
     yield from send_message(phone, "most ghosts hate\nthat lulz")
     yield from send_message(phone, "gl bro!")
 
+def hint_dialog_coro(phone, hint_dialog):
+    while hint_dialog:
+        to_del = []
+        for hint in hint_dialog:
+            if hint in phone.discovered:
+                for line in hint_dialog[hint]:
+                    yield from send_message(phone, line)
+                to_del.append(hint)
+            else:
+                yield
+        for hint in to_del:
+            del hint_dialog[hint]
+
 def messages2(phone):
     yield from send_message(phone, textwrap.dedent("""\
                                                    uh.. i don't know
@@ -717,17 +731,43 @@ def messages2(phone):
         'FRED': ["YO nice, it's FRED", "i've activated the vac"],
         'DEAD': ["uh yehh he's dead.", "we already knew that."],
         }
-    while hint_dialog:
-        to_del = []
-        for hint in hint_dialog:
-            if hint in phone.discovered:
-                for line in hint_dialog[hint]:
-                    yield from send_message(phone, line)
-                to_del.append(hint)
-            else:
-                yield
-        for hint in to_del:
-            del hint_dialog[hint]
+    yield from hint_dialog_coro(phone, hint_dialog)
+
+def messages3(phone):
+    yield from send_message(phone, textwrap.dedent("""\
+                                                   this station is
+                                                   haunted by a
+                                                   ferroequinologist"""), skip_wait=True)
+
+    yield from send_message(phone, textwrap.dedent("""\
+                                                   you know, a
+                                                   person who's
+                                                   obsessed with
+                                                   trains."""))
+    yield from send_message(phone, textwrap.dedent("""\
+                                                   i totally didn't
+                                                   like... google
+                                                   that ahead of time
+                                                   to look smart."""))
+
+    yield from send_message(phone, textwrap.dedent("""\
+                                                   anyway, you're
+                                                   gonna need to
+                                                   figure out his
+                                                   name too."""))
+
+    hint_dialog = {
+        'HI': ['"HI"?', "uh. maybe it's friendly?"],
+        'AI': ["uggh no", "AI is banned", "we're not getting into\nthat"],
+        'SICKLE T': ["uhh that sickle isn't\nominous at all", "don't freak out man,\nit'll be ok", "yeah", "it'll be fine"],
+        'JR': ["just a junior ghost?"],
+        }
+    yield from hint_dialog_coro(phone, hint_dialog)
+    notify("all hints found")
+    notify("use your phone to reconstruct the message")
+    phone.puzzle_state = 'solving'
+    yield from send_message(phone, "i guess they make\nup a larger message?")
+    yield from send_message(phone, "i've updated the\naberration pal app\non your phone\nso you can try\nput the pieces\ntogether.")
 
 
 maps = []
@@ -737,6 +777,7 @@ for p in ("station1.json", "station2.json", "station3.json"):
 maps[0].ghostvac_name = "ROB"
 maps[0].messages_func = messages1
 maps[1].messages_func = messages2
+maps[2].messages_func = messages3
 
 class GuiRow:
     def __init__(self, container_rect):
@@ -777,6 +818,13 @@ def scroll_panel(rect, title, content_height):
     yield g
     rl.end_scissor_mode()
 
+notifications = []
+def notify(text):
+    global notifications
+    notifications = notifications[:4]
+    notifications.append((5, text))
+
+
 def game_loop():
     map = maps[0]
     last_dir = vec2(1, 0)
@@ -800,7 +848,7 @@ def game_loop():
     state.ghost_target = vec2(0, 0)
     state.target_ttl = 0
     state.ghost_state = 'wandering'
-    notifications = []
+    notifications.clear()
 
     pnoise = perlin_noise.PerlinNoise(octaves=5)
 
@@ -817,16 +865,13 @@ def game_loop():
                      frame_width * state.ghost_health,
                      textures.ghost.height * state.ghost_health)
 
-    def notify(text, ttl=5):
-        nonlocal notifications
-        notifications = notifications[:4]
-        notifications.append((5, text))
-
     step_time = 0
     STEP_LENGTH = 0.2
 
     rl.play_music_stream(bg_soundscape)
     rl.play_music_stream(scared_loop)
+
+    clue_textures = [textures.a4, textures.a3, textures.a2, textures.a1]
 
     while not rl.window_should_close():
         #prof = Profiler()
@@ -1021,6 +1066,28 @@ def game_loop():
                 phone.scan()
             gui.row_rect(10)
             draw_text(phone.scan_results, gui.row_vec2(30) + vec2(5, 0), origin=(0, 0), color=rl.BLACK)
+            row = gui.row_rect(textures.a1.height)
+            if phone.puzzle_state == 'solving' or phone.puzzle_state == 'solved':
+                for i, tex in enumerate(clue_textures):
+                    w = tex.width * SCALE
+                    h = tex.height * SCALE
+                    cw = (w + (3 if phone.puzzle_state == 'solving' else 0))
+                    x = row.x + i * cw + (row.width - (cw * len(clue_textures))) / 2
+                    rl.draw_texture_pro(tex,
+                                        tex_rect(tex),
+                                        (x, row.y, w, h),
+                                        (0, 0),
+                                        0,
+                                        rl.WHITE)
+
+                    if phone.puzzle_state == 'solving':
+                        if i < len(clue_textures)-1 and rl.gui_button((x + w - 20, row.y + h + 20, 40, 20), "<>"):
+                            other = (i + 1) % len(clue_textures)
+                            clue_textures[i], clue_textures[other] = clue_textures[other], clue_textures[i]
+                if phone.puzzle_state == 'solving' and clue_textures == [textures.a1, textures.a2, textures.a3, textures.a4]:
+                    phone.puzzle_state = 'solved'
+                    map.ghostvac_name = "ARTHUR"
+
         elif phone.page == 2:
             rl.draw_texture_pro(canvas.texture, rl.Rectangle(0, 0, WIDTH // SCALE, -HEIGHT // SCALE), rl.Rectangle(0, 0, WIDTH, HEIGHT), rl.Vector2(), 0, rl.Color(220, 220, 255, 255))
             draw_text('CAMERA', gui.row_vec2(30, origin=(0.5, 0.5)), origin=(0.5, 0.5), color=rl.GREEN)
@@ -1135,6 +1202,7 @@ def game_loop():
 current_func = intro_loop
 current_func = game_loop
 
+maps.pop(0)
 maps.pop(0)
 rl.set_target_fps(60)
 try:
