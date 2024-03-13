@@ -999,6 +999,11 @@ def game_loop():
                 state.target_ttl = random.uniform(6, 20)
 
                 state.ghost_target = map.get_next_wander_point(state.ghost_pos)
+
+            if map.name == 'Fulton St' and not rl.is_sound_playing(sounds.toottoot) and (rl.get_time() % 10 < 1):
+                rl.play_sound(sounds.toottoot)
+                rl.set_sound_volume(sounds.toottoot, clamp((800 - length(state.player - state.ghost_pos)) / 800, 0.1, 0.7))
+
         elif state.ghost_state == 'enraged':
             state.ghost_target = state.player
             if ghost_to_vac_dist < SUCK_RANGE:
@@ -1265,8 +1270,6 @@ def game_loop():
         rl.end_drawing()
 
 current_func = intro_loop
-#current_func = game_loop
-#maps.pop(0)
 
 rl.set_target_fps(60)
 try:
