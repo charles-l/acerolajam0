@@ -4,7 +4,7 @@
   "height": 1344,
   "offsetX": 0,
   "offsetY": 0,
-  "values": {"StationName": "W 4th St", "StrictWander": true, "GhostName": "DAVE"},
+  "values": {"StationName": "W 4th St", "StrictWander": true, "GhostName": "ROB"},
   "layers": [
     {
       "name": "Entities",

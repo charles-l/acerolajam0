@@ -39,7 +39,7 @@
       "scaleable": false,
       "rotatable": false,
       "values": [
-        {"name": "hint", "definition": "String", "display": 0, "defaults": "", "maxLength": 0, "trimWhitespace": true}
+        {"name": "hint", "definition": "String", "display": 0, "defaults": "", "maxLength": 12, "trimWhitespace": true}
       ]
     },
     {

@@ -169,7 +169,7 @@
           "texture": "iamdead.png",
           "originX": 0.5,
           "originY": 0.5,
-          "values": {"hint": ""}
+          "values": {"hint": "DEAD"}
         },
         {
           "x": 560,

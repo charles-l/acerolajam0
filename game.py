@@ -105,7 +105,7 @@ class Map:
 
     def draw(self):
         tile_coord = (state.player // TILE_SIZE).to_tuple()
-        around = 8
+        around = 9
         ys = range(int(max(0, tile_coord[1]-around)), int(min(len(self.bg), tile_coord[1]+around)))
         xs = range(int(max(0, tile_coord[0]-around)), int(min(len(self.bg[0]), tile_coord[0]+around)))
         for y in ys:
@@ -191,6 +191,8 @@ for k, g in itertools.groupby(sorted(repeats), key=lambda x: x[0]):
 sound_files -= repeats
 for f in sound_files:
     setattr(sounds, f.removesuffix('.wav'), rl.load_sound(f))
+
+rl.set_sound_volume(sounds.notify, 0.3)
 
 bg_soundscape = rl.load_music_stream("bg.ogg")
 scared_loop = rl.load_music_stream("scared_loop.ogg")
@@ -290,7 +292,15 @@ class Phone:
         self.pic_contents = set()
         self.messages = []
         self.discovered = set()
-        self.messages_coro = messages_func(self)
+        self.messages_coro = messages_func(self) if messages_func else None
+        self.last_read = 0
+        self.last_read_ttl = 2
+
+    def add_message(self, msg):
+        self.messages.append(msg)
+        if self._is_showing and self.page == 0:
+            self.last_read = len(self.messages)
+            self.last_read_ttl = 2
 
     def show(self):
         self._is_showing = True
@@ -675,7 +685,9 @@ def send_message(phone, text, skip_wait=False):
             yield from wait_time(0.3)
         phone.messages.pop()
     rl.play_sound(sounds.notify)
-    phone.messages.append(TextMessage(text))
+    phone.add_message(TextMessage(text))
+    if skip_wait:
+        phone.last_read = len(phone.messages)
 
 def messages1(phone):
     yield from send_message(phone, textwrap.dedent("""\
@@ -706,13 +718,16 @@ def messages2(phone):
         'DEAD': ["uh yehh he's dead.", "we already knew that."],
         }
     while hint_dialog:
+        to_del = []
         for hint in hint_dialog:
             if hint in phone.discovered:
                 for line in hint_dialog[hint]:
                     yield from send_message(phone, line)
-                del hint_dialog[hint]
+                to_del.append(hint)
             else:
                 yield
+        for hint in to_del:
+            del hint_dialog[hint]
 
 
 maps = []
@@ -990,8 +1005,14 @@ def game_loop():
             rl.draw_rectangle_rec(gui.rect_remainder(), rl.GRAY)
             gui.row_rect(10)
             gui.row_rect(-60)
-            with scroll_panel(gui.rect_remainder(), "Messages: donnie", sum(m.height for m in phone.messages) + 10) as panel_gui:
-                for message in phone.messages:
+            if phone._is_showing and phone.last_read_ttl > 0:
+                phone.last_read_ttl -= rl.get_frame_time()
+                if phone.last_read_ttl <= 0:
+                    phone.last_read = len(phone.messages)
+            with scroll_panel(gui.rect_remainder(), "Messages: donnie", sum(m.height for m in phone.messages) + 40) as panel_gui:
+                for i, message in enumerate(phone.messages):
+                    if i == phone.last_read and not isinstance(message, StatusMessage):
+                        draw_text("----- unread  ", panel_gui.row_vec2(28, origin=(1, 0.5)), origin=(1, 0.5), color=rl.ORANGE)
                     message.draw(panel_gui.row_vec2(message.height) + vec2(10, 0))
         elif phone.page == 1:
             rl.draw_rectangle_rec(gui.rect_remainder(), rl.PURPLE)
@@ -1017,7 +1038,6 @@ def game_loop():
                     state.ghost_state = 'enraged'
 
                 for rec, hint in map.hints:
-                    print(rec)
                     if phone.in_viewfinder(rec):
                         notify(f"Discovered: {hint}")
                         if hint == 'FRED':
