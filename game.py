@@ -225,7 +225,8 @@ victory_music_final.looping = True
 
 GHOST_TRAIL_TTL = 2
 
-state = SimpleNamespace(phone=None)
+state = SimpleNamespace(phone=None,
+                        run_time=0)
 
 camera = rl.Camera2D(
     (WIDTH // SCALE // 2, HEIGHT // SCALE // 2),
@@ -322,9 +323,13 @@ class Phone:
         self.puzzle_state = 'hidden'
         self.clue_textures = [textures.a4, textures.a3, textures.a2, textures.a1]
 
+    @property
+    def is_messaging_active(self):
+        return self._is_showing and self.page == 0
+
     def add_message(self, msg):
         self.messages.append(msg)
-        if self._is_showing and self.page == 0:
+        if self.is_messaging_active:
             self.last_read = len(self.messages)
             self.last_read_ttl = 2
 
@@ -628,7 +633,9 @@ def victory_loop():
             yield from wait_time(4, allow_skip=True)
             current_func = game_loop
         else:
-            text = "You win!"
+            minutes = state.run_time // 60
+            seconds = state.run_time % 60
+            text = f"You win! Your time: {minutes:02.0f}:{seconds:06.03f}"
             victory_dance_frames = 8
             width = int(textures.victory_dance.width / victory_dance_frames)
             height = textures.victory_dance.height
@@ -720,7 +727,8 @@ def send_message(phone, text, skip_wait=False):
             phone.messages[-1] = StatusMessage("...")
             yield from wait_time(0.3)
         phone.messages.pop()
-    rl.play_sound(sounds.notify)
+    if not phone.is_messaging_active:
+        rl.play_sound(sounds.notify)
     phone.add_message(TextMessage(text))
     if skip_wait:
         phone.last_read = len(phone.messages)
@@ -912,6 +920,7 @@ def game_loop():
     rl.play_music_stream(scared_loop)
 
     while not rl.window_should_close():
+        state.run_time += rl.get_frame_time()
         #prof = Profiler()
         #prof.start()
         rl.update_music_stream(bg_soundscape)
@@ -1270,7 +1279,7 @@ def game_loop():
         #if rl.get_frame_time() > 0.017:
         #    prof.print(show_all=True, timeline=True)
 
-        rl.draw_fps(10, 10)
+        #rl.draw_fps(10, 10)
 
         rl.end_drawing()
 
