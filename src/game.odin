@@ -158,9 +158,15 @@ load_map :: proc(path: cstring) -> Map {
                     ghost_vac_id = create_entity()
                     aabb := add_component(rl.Rectangle, ghost_vac_id)
                     aabb^ = rect_from_json(o_entity);
+                    width := f32(textures.ghostvac.width) / 2
+                    aabb.width = width
+                    aabb.height = f32(textures.ghostvac.height)
                     sprite := add_component(Sprite, ghost_vac_id)
                     sprite.tex = &textures.ghostvac
-                    sprite.source_rect = rl.Rectangle{0, 0, 16, 16}
+                    sprite.source_rect = rl.Rectangle{
+                        0, 0,
+                        width, f32(textures.ghostvac.height)
+                    }
                     //tweens := add_component(Tweens, cube)
                 case "turnstile":
                     t_id := create_entity()
