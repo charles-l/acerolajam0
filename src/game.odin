@@ -1,6 +1,7 @@
 package main
 import "core:runtime"
 import rl "raylib"
+import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import c "core:c"
@@ -27,9 +28,9 @@ ctx: runtime.Context
 font: rl.Font
 
 TILE_SIZE :: 16
-SCALE: i32 = 4
-WIDTH: i32 = 300 * SCALE
-HEIGHT: i32 = 200 * SCALE
+SCALE :: 4
+WIDTH :: 300 * SCALE
+HEIGHT :: 200 * SCALE
 
 STEP_LENGTH :: 0.2
 last_dir := rl.Vector2{1, 0}
@@ -260,10 +261,10 @@ init :: proc "c" () {
 
     init_ecs()
 
-    camera.offset = Vector2{f32(WIDTH / SCALE / 2), f32(HEIGHT / SCALE / 2)};
+    camera.offset = Vector2{WIDTH / SCALE / 2, HEIGHT / SCALE / 2};
     camera.target = Vector2{};
     camera.rotation = 0;
-    camera.zoom = 2
+    camera.zoom = 1
     InitWindow(WIDTH, HEIGHT, "Aberration Station")
     textures.tiles = rl.LoadTexture("resources/tiles.png")
     textures.hero = rl.LoadTexture("resources/hero.png")
@@ -329,7 +330,6 @@ get_signed_collision_rec :: proc(r1: rl.Rectangle, r2: rl.Rectangle) -> rl.Recta
 }
 
 resolve_static_collisions :: proc(it: SpatialIterator, actor: ^rl.Rectangle) -> bool {
-    colors := []rl.Color{rl.BLUE, rl.GREEN, rl.RED}
     moved := false
     aabb := actor^
     for i in 0..<3 {
@@ -353,6 +353,7 @@ resolve_static_collisions :: proc(it: SpatialIterator, actor: ^rl.Rectangle) -> 
         }
         if most_overlap != 0.0 {
             moved = true
+            //colors := []rl.Color{rl.BLUE, rl.GREEN, rl.RED}
             //rl.DrawRectangleLinesEx(rl.Rectangle{
             //    most_overlap_rect.x,
             //    most_overlap_rect.y,
@@ -400,7 +401,6 @@ update :: proc "c" () {
     r := get_component(rl.Rectangle, hero_id)
     r.x += input.x
     r.y += input.y
-
     speed_mod := f32(1.0)
 
     hero_sprite := get_component(Sprite, hero_id)
@@ -421,11 +421,17 @@ update :: proc "c" () {
         }
     }
 
+    if last_dir.x != 0 && math.sign(last_dir.x) != math.sign(hero_sprite.source_rect.width) {
+        hero_sprite.source_rect.width = -hero_sprite.source_rect.width
+    }
+
     resolve_static_collisions(
         spatial_query_near(&stations[0].static_colliders, entity_pos(hero_id)),
         r,
     )
-    camera.target = rl.Vector2{r.x, r.y}
+
+    // no subpixel movement -- it's leads to weird wraparound texture bugs
+    camera.target = rl.Vector2{f32(int(r.x)), f32(int(r.y))}
 
     ClearBackground(BLACK)
     BeginMode2D(camera)
@@ -437,21 +443,14 @@ update :: proc "c" () {
             cols := len(bg_tiles[0])
             maybe_draw_tile :: proc(grid: [][]u8, x: int, y: int) {
                 if grid[y][x] != 0xFF {
-                    rl.DrawTexturePro(textures.tiles,
+                    rl.DrawTextureRec(textures.tiles,
                         rl.Rectangle {
-                            f32(grid[y][x]) * f32(TILE_SIZE),
+                            f32(int(grid[y][x] * TILE_SIZE)),
                             0,
-                            f32(TILE_SIZE),
-                            f32(TILE_SIZE)
+                            TILE_SIZE,
+                            TILE_SIZE
                         },
-                        rl.Rectangle{
-                            f32(x) * f32(TILE_SIZE),
-                            f32(y) * f32(TILE_SIZE),
-                            f32(TILE_SIZE),
-                            f32(TILE_SIZE)
-                        },
-                        rl.Vector2{},
-                        0,
+                        rl.Vector2{f32(int(x * TILE_SIZE)), f32(y * TILE_SIZE)},
                         rl.WHITE)
                 }
             }
@@ -466,6 +465,9 @@ update :: proc "c" () {
             view := make_scene_view(rl.Rectangle)
             for e in iterate_scene_view(&view) {
                 dest := get_component(rl.Rectangle, e)^
+                // no subpixel drawing for pixel art
+                dest.x = f32(int(dest.x))
+                dest.y = f32(int(dest.y))
                 if s, ok := get_component_safe(Sprite, e).?; ok {
                     dest.x += s.draw_offset.x
                     dest.y += s.draw_offset.y
@@ -484,7 +486,7 @@ update :: proc "c" () {
     }
     EndMode2D()
 
-    draw_text("HI!", rl.Vector2{10, 10})
+    rl.DrawFPS(10, 10)
 }
 
 
