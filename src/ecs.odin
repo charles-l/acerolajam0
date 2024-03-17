@@ -10,7 +10,8 @@ Tweens :: struct {
 
 Sprite :: struct {
     tex: ^raylib.Texture,
-    source_rect: raylib.Rectangle
+    source_rect: raylib.Rectangle,
+    draw_offset: raylib.Vector2,
 }
 
 all_components := []typeid {

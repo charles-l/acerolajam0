@@ -2,6 +2,7 @@ package main
 import "core:runtime"
 import rl "raylib"
 import "core:math/linalg"
+import "core:math/rand"
 import c "core:c"
 import "core:mem"
 import "core:strings"
@@ -30,9 +31,11 @@ SCALE: i32 = 4
 WIDTH: i32 = 300 * SCALE
 HEIGHT: i32 = 200 * SCALE
 
+STEP_LENGTH :: 0.2
 last_dir := rl.Vector2{1, 0}
 light_offset := rl.Vector2{}
 hero_id: EntityID
+step_time: f32 = 0
 ghost_vac_id: EntityID
 
 CELL_SIZE :: 128
@@ -108,6 +111,7 @@ textures := struct {
 }{}
 
 textures2: map[string]rl.Texture
+footsteps: [4]rl.Sound
 
 import "core:fmt"
 load_map :: proc(path: cstring) -> Map {
@@ -283,6 +287,11 @@ init :: proc "c" () {
     DEFAULT: i32 = 0
     TEXT_SIZE: i32 = 16
     rl.gui_set_style(DEFAULT, TEXT_SIZE, 24)
+
+    footsteps[0] = rl.LoadSound("resources/step_0.wav")
+    footsteps[1] = rl.LoadSound("resources/step_1.wav")
+    footsteps[2] = rl.LoadSound("resources/step_2.wav")
+    footsteps[3] = rl.LoadSound("resources/step_3.wav")
 }
 
 @export
@@ -358,7 +367,6 @@ resolve_static_collisions :: proc(it: SpatialIterator, actor: ^rl.Rectangle) -> 
     return moved
 }
 
-i := 0
 @export
 update :: proc "c" () {
     using rl
@@ -392,6 +400,26 @@ update :: proc "c" () {
     r := get_component(rl.Rectangle, hero_id)
     r.x += input.x
     r.y += input.y
+
+    speed_mod := f32(1.0)
+
+    hero_sprite := get_component(Sprite, hero_id)
+    hero_sprite.draw_offset.y = 0;
+    if input != (rl.Vector2{}) {
+        last_dir = linalg.normalize(input)
+
+        step_time += rl.GetFrameTime() * speed_mod
+
+        if step_time > STEP_LENGTH {
+            step_time = 0
+            // FIXME: random step sound
+            rl.PlaySound(rand.choice(footsteps[:]))
+        }
+
+        if step_time > STEP_LENGTH / 2 {
+            hero_sprite.draw_offset.y = -2;
+        }
+    }
 
     resolve_static_collisions(
         spatial_query_near(&stations[0].static_colliders, entity_pos(hero_id)),
@@ -439,6 +467,8 @@ update :: proc "c" () {
             for e in iterate_scene_view(&view) {
                 dest := get_component(rl.Rectangle, e)^
                 if s, ok := get_component_safe(Sprite, e).?; ok {
+                    dest.x += s.draw_offset.x
+                    dest.y += s.draw_offset.y
                     DrawTexturePro(s.tex^, s.source_rect, dest, rl.Vector2{}, 0, rl.WHITE)
                 } else {
                     DrawRectangleRec(dest, rl.RED)
