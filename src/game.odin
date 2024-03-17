@@ -259,7 +259,7 @@ init :: proc "c" () {
     camera.offset = Vector2{f32(WIDTH / SCALE / 2), f32(HEIGHT / SCALE / 2)};
     camera.target = Vector2{};
     camera.rotation = 0;
-    camera.zoom = 1
+    camera.zoom = 2
     InitWindow(WIDTH, HEIGHT, "Aberration Station")
     textures.tiles = rl.LoadTexture("resources/tiles.png")
     textures.hero = rl.LoadTexture("resources/hero.png")
@@ -308,9 +308,54 @@ entity_pos :: proc(e: EntityID) -> rl.Vector2 {
     return rl.Vector2{r.x, r.y}
 }
 
-resolve_static_collisions :: proc(it: SpatialIterator, actor: ^rl.Rectangle) {
-    for 0..<3 {
+get_signed_collision_rec :: proc(r1: rl.Rectangle, r2: rl.Rectangle) -> rl.Rectangle {
+    r := rl.GetCollisionRec(r1, r2)
+    if r2.x < r1.x {
+        r.width = -r.width
     }
+    if r2.y < r1.y {
+        r.height = -r.height
+    }
+    return r
+}
+
+resolve_static_collisions :: proc(it: SpatialIterator, actor: ^rl.Rectangle) -> bool {
+    colors := []rl.Color{rl.BLUE, rl.GREEN, rl.RED}
+    moved := false
+    aabb := actor^
+    for i in 0..<3 {
+        it2 := it
+        most_overlap: f32 = 0.0
+        most_overlap_rect := rl.Rectangle{}
+        for r in iterate_spatial(&it2) {
+            overlap := get_signed_collision_rec(r, aabb)
+            o := abs(overlap.width * overlap.height)
+            if o > most_overlap {
+                most_overlap = o
+                most_overlap_rect = overlap
+            }
+        }
+        up := false
+        if abs(most_overlap_rect.width) < abs(most_overlap_rect.height) {
+            aabb.x += most_overlap_rect.width
+        } else {
+            aabb.y += most_overlap_rect.height
+            up = true
+        }
+        if most_overlap != 0.0 {
+            moved = true
+            //rl.DrawRectangleLinesEx(rl.Rectangle{
+            //    most_overlap_rect.x,
+            //    most_overlap_rect.y,
+            //    abs(most_overlap_rect.width),
+            //    abs(most_overlap_rect.height),
+            //}, 1, colors[i])
+            //fmt.println(i, most_overlap, most_overlap_rect, "vert" if up else "horiz")
+        }
+    }
+    actor.x = aabb.x
+    actor.y = aabb.y
+    return moved
 }
 
 i := 0
@@ -347,6 +392,12 @@ update :: proc "c" () {
     r := get_component(rl.Rectangle, hero_id)
     r.x += input.x
     r.y += input.y
+
+    resolve_static_collisions(
+        spatial_query_near(&stations[0].static_colliders, entity_pos(hero_id)),
+        r,
+    )
+    camera.target = rl.Vector2{r.x, r.y}
 
     ClearBackground(BLACK)
     BeginMode2D(camera)
@@ -393,6 +444,7 @@ update :: proc "c" () {
                     DrawRectangleRec(dest, rl.RED)
                 }
             }
+
 
             it := spatial_query_near(&stations[0].static_colliders, entity_pos(hero_id))
             for rect in iterate_spatial(&it) {

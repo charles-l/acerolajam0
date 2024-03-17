@@ -4,3 +4,4 @@
 *.data
 zig-cache/
 zig-out/
+__pycache__/
